@@ -29,6 +29,7 @@ import { checkAndUpgradePracticeWordCache, PRACTICE_ARTICLE_CACHE, PRACTICE_WORD
 import { useDataSyncPersistence } from '@/core/composables/useDataSyncPersistence'
 import SettingItem from '@/components/setting/SettingItem.vue'
 import { Supabase } from '@/core/utils/supabase.ts'
+import { isDesktop } from '@/core/utils/desktop'
 import BackupGateDialog from '@/components/dialog/BackupGateDialog.vue'
 
 import { createClient } from '@supabase/supabase-js'
@@ -61,6 +62,8 @@ useSeoMeta({
 })
 
 const tabIndex = $ref(Number(route?.query?.index ?? 0))
+// 桌面版（Tauri）：不提供 Supabase 云同步入口，也不提供浏览器专用的「跳过导出」开关
+const desktop = isDesktop()
 const settingStore = useSettingStore()
 const runtimeStore = useRuntimeStore()
 const store = useBaseStore()
@@ -599,7 +602,7 @@ function disable360() {
               <span>{{ $t('data_management') }}</span>
             </div>
 
-            <div class="tab" :class="tabIndex === 6 && 'active'" @click="tabIndex = 6">
+            <div class="tab" v-if="!desktop" :class="tabIndex === 6 && 'active'" @click="tabIndex = 6">
               <IconFluentCloudSync20Regular />
               <span>{{ $t('data_sync') }}</span>
               <div class="red-point" v-if="runtimeStore.isError"></div>
@@ -658,6 +661,7 @@ function disable360() {
                 <BaseButton size="large">{{ $t('clear_all_data') }}</BaseButton>
               </PopConfirm>
               <PopConfirm
+                v-if="!desktop"
                 title="不要乱点，点击后会使导出功能失效，仅适用于： Mac 版本 360 极速浏览器"
                 @confirm="disable360"
               >
@@ -666,7 +670,7 @@ function disable360() {
             </div>
           </div>
 
-          <div v-if="tabIndex === 6">
+          <div v-if="!desktop && tabIndex === 6">
             <p class="text-red font-bold">过时功能：由于经常同步失败，不再推荐继续使用，请等待官方同步功能</p>
             <!--          Supabase 设置  -->
             <SettingItem :title="$t('supabase_config')" :desc="$t('supabase_config_desc')">

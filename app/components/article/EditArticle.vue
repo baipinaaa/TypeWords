@@ -7,13 +7,11 @@ import {
   Tooltip,
   Textarea,
   Toast,
-  Option,
-  Select,
   BaseInput,
   UploadButton,
 } from '@/base'
 import EditAbleText from '@/components/EditAbleText.vue'
-import { getNetworkTranslate, getSentenceAllText, getSentenceAllTranslateText } from '@/core/hooks/translate.ts'
+import { getSentenceAllText, getSentenceAllTranslateText } from '@/core/hooks/translate.ts'
 import { genArticleSectionData, splitCNArticle2, splitEnArticle2, usePlaySentenceAudio } from '@/core/hooks/article.ts'
 import { _nextTick, _parseLRC, cloneDeep, last } from '@/core/utils'
 import { defineAsyncComponent, watch } from 'vue'
@@ -25,7 +23,6 @@ import { nanoid } from 'nanoid'
 import { update } from 'idb-keyval'
 import ArticleAudio from './ArticleAudio.vue'
 import { LOCAL_FILE_KEY } from '@/core/config/env.ts'
-import { TranslateEngine } from '@/core/types'
 import { useI18n } from 'vue-i18n'
 
 const Dialog = defineAsyncComponent(() => import('@/base/dialog/Dialog.vue'))
@@ -46,14 +43,8 @@ const emit = defineEmits<{
   saveAndNext: [val: Article]
 }>()
 
-let networkTranslateEngine = $ref('baidu')
-let progress = $ref(0)
 let failCount = $ref(0)
 let resultRef = $ref<HTMLDivElement>()
-const TranslateEngineOptions = [
-  // {value: 'youdao', label: '有道'},
-  { value: 'baidu', label: '百度' },
-]
 
 let editArticle = $ref<Article>(getDefaultArticle())
 
@@ -61,7 +52,6 @@ watch(
   () => props.article,
   val => {
     editArticle = getDefaultArticle(val)
-    progress = 0
     failCount = 0
     apply(false)
     _nextTick(() => {
@@ -101,28 +91,6 @@ function splitText() {
 //分句翻译
 function splitTranslateText() {
   editArticle.textTranslate = splitCNArticle2(editArticle.textTranslate.trim())
-}
-
-//TODO
-async function startNetworkTranslate() {
-  if (!editArticle.title.trim()) {
-    return Toast.error($t('please_fill_title'))
-  }
-  if (!editArticle.text.trim()) {
-    return Toast.error($t('please_fill_content'))
-  }
-  editArticle.titleTranslate = ''
-  editArticle.textTranslate = ''
-  apply()
-  //注意！！！
-  //这里需要用异步，因为watch了article.networkTranslate，改变networkTranslate了之后，会重新设置article.sections
-  //导致getNetworkTranslate里面拿到的article.sections是废弃的值
-  setTimeout(async () => {
-    await getNetworkTranslate(editArticle, TranslateEngine.Baidu, false, (v: number) => {
-      progress = v
-    })
-    failCount = 0
-  })
 }
 
 function saveSentenceTranslate(sentence: Sentence, val: string) {
@@ -379,7 +347,6 @@ function minusStartTime(val: Sentence) {
         <div class="shrink-0">{{ $t('title') }}：</div>
         <BaseInput
           v-model="editArticle.title"
-          :disabled="![100, 0].includes(progress)"
           type="text"
           :placeholder="$t('please_fill_original_title')"
         />
@@ -398,7 +365,6 @@ function minusStartTime(val: Sentence) {
       <Textarea
         v-model="editArticle.text"
         class="h-full"
-        :disabled="![100, 0].includes(progress)"
         :placeholder="$t('please_paste_original')"
         :autosize="false"
       />
@@ -434,7 +400,6 @@ function minusStartTime(val: Sentence) {
         <div class="shrink-0">{{ $t('title') }}：</div>
         <BaseInput
           v-model="editArticle.titleTranslate"
-          :disabled="![100, 0].includes(progress)"
           type="text"
           :placeholder="$t('please_fill_translation_title')"
         />
@@ -445,20 +410,10 @@ function minusStartTime(val: Sentence) {
       <Textarea
         v-model="editArticle.textTranslate"
         class="h-full"
-        :disabled="![100, 0].includes(progress)"
         :placeholder="$t('please_fill_translation')"
         :autosize="false"
       />
       <div class="justify-between items-center flex">
-        <div class="flex gap-space items-center w-50" v-if="false">
-          <BaseButton @click="startNetworkTranslate" :loading="progress !== 0 && progress !== 100"
-            >{{ $t('translate') }}
-          </BaseButton>
-          <Select v-model="networkTranslateEngine">
-            <Option v-for="item in TranslateEngineOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </Select>
-          {{ progress }}%
-        </div>
         <div></div>
         <div class="flex items-center">
           <Tooltip>
@@ -517,14 +472,12 @@ function minusStartTime(val: Sentence) {
               <div class="sentence" v-for="(sentence, indexJ) in item">
                 <div class="flex-[7]">
                   <EditAbleText
-                    :disabled="![100, 0].includes(progress)"
                     :value="sentence.text"
                     @save="(e: string) => saveSentenceText(sentence, e)"
                   />
                   <EditAbleText
                     class="text-lg!"
                     v-if="sentence.translate"
-                    :disabled="![100, 0].includes(progress)"
                     :value="sentence.translate"
                     @save="(e: string) => saveSentenceTranslate(sentence, e)"
                   />

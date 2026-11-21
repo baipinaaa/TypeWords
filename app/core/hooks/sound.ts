@@ -4,6 +4,9 @@ import { ref } from 'vue'
 
 import { ENV, PronunciationApi, SoundFileOptions } from '../config/env'
 import { Toast } from '@/base'
+import { isDesktop } from '../utils/desktop'
+import { cancelEspeakAudio, isEspeakAvailable, playEspeak } from './espeak'
+import { cancelPiperAudio, isPiperAvailable, playPiper } from './piper'
 
 /**
  * 获取当前浏览器的 OS+浏览器 组合 key，用于 ttsVoiceMap 的索引
@@ -163,6 +166,8 @@ function getCachedWordAudio(): HTMLAudioElement | null {
 export function cancelWordPracticeAudio() {
   wordPlaybackGeneration++
   ttsPlaybackGeneration++
+  cancelEspeakAudio()
+  cancelPiperAudio()
   if (typeof speechSynthesis !== 'undefined') {
     speechSynthesis.pause()
     speechSynthesis.cancel()
@@ -209,13 +214,21 @@ export function usePlayWordAudio() {
       }, 5000)
     }
     // console.log('playAudio-handle', handle, playbackRate)
-    let url = `${PronunciationApi}${word}&type=2`
-    if (settingStore.soundType === 'uk') {
-      url = `${PronunciationApi}${word}&type=1`
-    }
     let onended = () => {
       if (generation !== wordPlaybackGeneration) return
       onEnd?.()
+    }
+
+    // 桌面版（离线）：不请求有道发音，改用内置 espeak-ng（en-gb）合成
+    if (isDesktop()) {
+      useTTsPlayAudio().play(word, { rate: playbackRate, onEnd: onended })
+      onPlay?.()
+      return
+    }
+
+    let url = `${PronunciationApi}${word}&type=2`
+    if (settingStore.soundType === 'uk') {
+      url = `${PronunciationApi}${word}&type=1`
     }
     wordAudio.onended = onended
     wordAudio.onplay = () => onPlay?.()
@@ -255,8 +268,8 @@ export interface TTsPlayOptions {
 export function useTTsPlayAudio() {
   const settingStore = useSettingStore()
 
-  function play(text: string, options: TTsPlayOptions = {}) {
-    if (!text || typeof speechSynthesis === 'undefined') return
+  function playWithSpeechSynthesis(text: string, options: TTsPlayOptions = {}) {
+    if (typeof speechSynthesis === 'undefined') return
     const generation = ++ttsPlaybackGeneration
     speechSynthesis.cancel() // 防止 Chrome 队列卡死
     let msg = new SpeechSynthesisUtterance(text)
@@ -286,6 +299,35 @@ export function useTTsPlayAudio() {
       }
       speechSynthesis.speak(msg)
     })
+  }
+
+  function play(text: string, options: TTsPlayOptions = {}) {
+    if (!text) return
+    // 桌面版（离线）：piper（en-GB cori-high）优先 → espeak-ng 兜底 → 系统 TTS
+    if (isEspeakAvailable()) {
+      void playDesktopTtsChain(text, options)
+      return
+    }
+    playWithSpeechSynthesis(text, options)
+  }
+
+  async function playDesktopTtsChain(text: string, options: TTsPlayOptions) {
+    const generation = ++ttsPlaybackGeneration
+    const sharedOptions = {
+      rate: options.rate ?? settingStore.wordSoundSpeed,
+      volume: options.volume ?? settingStore.wordSoundVolume / 100,
+      onEnd: () => {
+        if (generation !== ttsPlaybackGeneration) return
+        options.onEnd?.()
+      },
+    }
+
+    if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
+    if (generation !== ttsPlaybackGeneration) return
+    if (await playEspeak(text, sharedOptions)) return
+    if (generation !== ttsPlaybackGeneration) return
+    // 两个内置引擎都不可用（如资源缺失）时，回退到 WebView2 的系统 TTS
+    playWithSpeechSynthesis(text, options)
   }
 
   return play

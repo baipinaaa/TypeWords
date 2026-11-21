@@ -5,6 +5,7 @@ import ShareIcon from './ShareIcon.vue'
 import WeChat from './WeChat.vue'
 import Github from './Github.vue'
 import { withAppBaseURL } from '@/core/utils/base-url'
+import { isDesktop } from '@/core/utils/desktop'
 
 withDefaults(
   defineProps<{
@@ -30,7 +31,7 @@ const qqQrSrc = withAppBaseURL('/imgs/channel/qq.jpg')
 </script>
 
 <template>
-  <div class="center" :class="type === 'vertical' ? 'flex-col gap-1' : 'gap-4'">
+  <div v-if="!isDesktop()" class="center" :class="type === 'vertical' ? 'flex-col gap-1' : 'gap-4'">
     <Github v-if="github" />
 
     <WeChat v-if="wechat" />

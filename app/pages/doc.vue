@@ -4,7 +4,10 @@ import { BaseButton, BasePage } from '@/base'
 import QRCode from 'qrcode'
 import ResourceCard from '@/components/ResourceCard.vue'
 import { APP_NAME, Origin } from '@/core/config/env.ts'
+import { isDesktop } from '@/core/utils/desktop'
 import type { Resource } from '@/core'
+
+const desktop = isDesktop()
 
 let route = useRoute()
 let title = APP_NAME + ' 英语学习资源分享'
@@ -402,7 +405,7 @@ async function openLink(url: string, name?: string) {
       </div>
 
       <!-- 分类筛选 -->
-      <div class="card-white flex flex-wrap justify-center gap-2 mb-8 p-4">
+      <div v-if="!desktop" class="card-white flex flex-wrap justify-center gap-2 mb-8 p-4">
         <BaseButton :type="selectedCategory === 'all' ? 'primary' : 'info'" @click="selectedCategory = 'all'">
           {{ $t('all_resources') }}
         </BaseButton>
@@ -416,8 +419,13 @@ async function openLink(url: string, name?: string) {
         </BaseButton>
       </div>
 
+      <!-- 桌面版（离线）不提供网盘资源 -->
+      <div v-if="desktop" class="card-white mb-8 p-6 text-center text-gray-600 dark:text-gray-300">
+        桌面版为离线版本，不内置网盘资源分享页面。
+      </div>
+
       <!-- 资源列表 -->
-      <div class="w-full">
+      <div v-if="!desktop" class="w-full">
         <div v-for="category in filteredResources" :key="category.id" class="mb-12">
           <div class="text-center mb-6">
             <h2 class="text-2xl font-bold mb-2">{{ category.icon }} {{ category.name }}</h2>
@@ -469,7 +477,7 @@ async function openLink(url: string, name?: string) {
           <div class="text-xl font-bold mb-4">温馨提示</div>
           <ul class="space-y-2 text-gray-600 dark:text-gray-300">
             <li>所有资源均来自互联网收集，仅供学习交流使用</li>
-            <li>
+            <li v-if="!desktop">
               如果链接失效，请及时<a :href="`https://v.wjx.cn/vm/ev0W7fv.aspx#`" target="_blank">告知</a>，我会尽快更新
             </li>
           </ul>

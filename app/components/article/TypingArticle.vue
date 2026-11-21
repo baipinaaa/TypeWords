@@ -16,6 +16,7 @@ import { getDefaultArticle, getDefaultWord } from '@/core/types'
 import type { Article, ArticleWord, Sentence, Word } from '@/core/types'
 import { _dateFormat, _nextTick, isMobile, msToHourMinute, total, debounce } from '@/core/utils'
 import { emitter, EventKey, useEvents } from '@/core/utils/eventBus'
+import { isDesktop } from '@/core/utils/desktop'
 import ContextMenu from '@imengyu/vue3-context-menu'
 import '@imengyu/vue3-context-menu/lib/vue3-context-menu.css'
 import nlp from 'compromise/three'
@@ -665,35 +666,40 @@ function onContextMenu(e: MouseEvent, sentence: Sentence, i, j, w) {
           emit('play', { sentence: sentence, handle: true })
         },
       },
-      {
-        label: $t('grammar_analysis'),
-        onClick: () => {
-          navigator.clipboard.writeText(sentence.text).then(r => {
-            Toast.success($t('copied_open_grammar'))
-            setTimeout(() => {
-              window.open('https://enpuz.com/')
-            }, 1000)
-          })
-        },
-      },
-      {
-        label: $t('youdao_translate'),
-        children: [
-          {
-            label: $t('translate_word'),
-            onClick: () => {
-              let word = props.article.sections[i][j].words[w]
-              window.open(`https://www.youdao.com/result?word=${word.word}&lang=en`, '_blank')
+      // 桌面版为离线版本：语法分析（enpuz）与有道翻译都需要联网，不提供
+      ...(isDesktop()
+        ? []
+        : [
+            {
+              label: $t('grammar_analysis'),
+              onClick: () => {
+                navigator.clipboard.writeText(sentence.text).then(r => {
+                  Toast.success($t('copied_open_grammar'))
+                  setTimeout(() => {
+                    window.open('https://enpuz.com/')
+                  }, 1000)
+                })
+              },
             },
-          },
-          {
-            label: $t('translate_sentence'),
-            onClick: () => {
-              window.open(`https://www.youdao.com/result?word=${sentence.text}&lang=en`, '_blank')
+            {
+              label: $t('youdao_translate'),
+              children: [
+                {
+                  label: $t('translate_word'),
+                  onClick: () => {
+                    let word = props.article.sections[i][j].words[w]
+                    window.open(`https://www.youdao.com/result?word=${word.word}&lang=en`, '_blank')
+                  },
+                },
+                {
+                  label: $t('translate_sentence'),
+                  onClick: () => {
+                    window.open(`https://www.youdao.com/result?word=${sentence.text}&lang=en`, '_blank')
+                  },
+                },
+              ],
             },
-          },
-        ],
-      },
+          ]),
     ],
   })
 }

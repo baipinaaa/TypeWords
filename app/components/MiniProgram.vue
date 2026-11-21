@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { BaseButton, BaseIcon, Toast } from '@/base'
+import { isDesktop } from '@/core/utils/desktop.ts'
+
+// 桌面端（Tauri）不展示小程序推广，根节点 v-if 后渲染为注释节点
+const desktop = isDesktop()
 
 // 小程序二维码推广
 const LS_KEY_MINI_QR_DATE = 'tw_mini_qr_last_date'
@@ -56,7 +60,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="relative z-999" @mouseenter="handleMiniIconEnter" @mouseleave="handleMiniIconLeave">
+  <div
+    v-if="!desktop"
+    class="relative z-999"
+    @mouseenter="handleMiniIconEnter"
+    @mouseleave="handleMiniIconLeave"
+  >
     <div
       class="pt-2 -right-2 absolute z-999 top-full transition-all duration-300"
       :class="{

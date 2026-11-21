@@ -3,9 +3,13 @@ import { watch } from 'vue'
 import { BaseButton, Dialog } from '@/base'
 import { useExport } from '@/core/hooks/export'
 import { IS_DEV } from '@/core/config/env.ts'
+import { isDesktop } from '@/core/utils/desktop'
 import { Toast } from '~/base'
 
 const model = defineModel()
+
+// 桌面版数据保存在程序目录下的 ./app-data（便携），备份方式与网页版不同
+const desktop = isDesktop()
 
 const { loading: backupLoading, exportData } = useExport()
 
@@ -28,7 +32,11 @@ async function onBackup() {
 <template>
   <Dialog v-model="model" title="数据备份">
     <div class="flex flex-col gap-3 p-4 w-100">
-      <div>
+      <div v-if="desktop">
+        进行下一步操作前，建议先备份数据：可点<span class="text-red font-bold"> 数据备份 </span
+        >导出 zip 文件，或直接复制程序目录下的 <span class="font-bold">app-data</span> 文件夹整体备份
+      </div>
+      <div v-else>
         进行下一步操作前，请先点击<span class="text-red font-bold"> 数据备份 </span
         >按钮备份当前数据，避免误操作导致数据无法恢复
       </div>

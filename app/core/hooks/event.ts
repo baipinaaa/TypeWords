@@ -144,7 +144,9 @@ export function useEventListener(type: string, listener: EventListenerOrEventLis
         return input
       }
 
-      const hiddenInput = ensureMobileInput()
+      // 桌面端（Tauri + Windows WebView2）不创建离屏输入框：IME 在带文本的 input 上首次聚焦会冻结 TSF
+      // （tauri-apps/tauri#15436），且桌面端没有软键盘需求，按键全部由 window keydown 处理。
+      const hiddenInput = isMobile() ? ensureMobileInput() : null
       let isComposing = false
 
       const createSyntheticEvent = (payload: { key: string; code?: string; keyCode: number }) => {
@@ -219,6 +221,7 @@ export function useEventListener(type: string, listener: EventListenerOrEventLis
       const handleFocusRequest = (event: MouseEvent | TouchEvent) => {
         const target = event.target as HTMLElement | null
         if (!target) return
+        if (!hiddenInput) return
         if (!window.location.pathname.includes('/practice')) return
         const typingWord = target.closest('#PracticeArea')
         if (!typingWord) return
@@ -245,14 +248,16 @@ export function useEventListener(type: string, listener: EventListenerOrEventLis
         setTimeout(() => emitWindowsKeys.delete(e.key), 30)
       }
 
-      hiddenInput.addEventListener('compositionstart', handleCompositionStart)
-      registerCleanup(() => hiddenInput.removeEventListener('compositionstart', handleCompositionStart))
+      if (hiddenInput) {
+        hiddenInput.addEventListener('compositionstart', handleCompositionStart)
+        registerCleanup(() => hiddenInput.removeEventListener('compositionstart', handleCompositionStart))
 
-      hiddenInput.addEventListener('compositionend', handleCompositionEnd)
-      registerCleanup(() => hiddenInput.removeEventListener('compositionend', handleCompositionEnd))
+        hiddenInput.addEventListener('compositionend', handleCompositionEnd)
+        registerCleanup(() => hiddenInput.removeEventListener('compositionend', handleCompositionEnd))
 
-      hiddenInput.addEventListener('input', handleInput, { capture: true })
-      registerCleanup(() => hiddenInput.removeEventListener('input', handleInput, { capture: true }))
+        hiddenInput.addEventListener('input', handleInput, { capture: true })
+        registerCleanup(() => hiddenInput.removeEventListener('input', handleInput, { capture: true }))
+      }
 
       window.addEventListener('click', handleFocusRequest)
       registerCleanup(() => window.removeEventListener('click', handleFocusRequest))
@@ -263,7 +268,7 @@ export function useEventListener(type: string, listener: EventListenerOrEventLis
       window.addEventListener(type, windowListener, { capture: true })
       registerCleanup(() => window.removeEventListener(type, windowListener, { capture: true }))
 
-      registerCleanup(() => hiddenInput.remove())
+      registerCleanup(() => hiddenInput?.remove())
     } else {
       const windowListener = (event: Event) => invokeListener(event as KeyboardEvent)
       window.addEventListener(type, windowListener, { capture: true })

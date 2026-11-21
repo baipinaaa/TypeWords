@@ -1,0 +1,244 @@
+name: Release Desktop (Windows)
+
+# 触发方式：
+#   1) 打 tag：git tag v1.0.0 && git push origin v1.0.0  → 构建并直接发布到 GitHub Release
+#   2) 手动：Actions 页面 "Run workflow"，填一个 tag（如 v1.0.0-rc1）→ 构建并直接发布到该 tag 的 Release
+# 不再上传 Actions artifact，安装包只以 Release 附件的形式产出。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布用的 tag 名（如 v1.0.0，不存在时会基于本次提交创建）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# NUXT_DESKTOP=1 让 nuxt.config.ts 走纯 SPA（ssr:false），这是 Tauri 静态产物所必需的
+env:
+  NUXT_DESKTOP: '1'
+  NUXT_TELEMETRY_DISABLED: '1'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      # tag 推送时用 ref_name，手动触发时用输入值
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 1 即可；nuxt.config.ts 里的 latestCommitHash 依赖 git rev-parse --short HEAD
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        # 本轮新增了 @tauri-apps/* 依赖但 pnpm-lock.yaml 尚未更新，故不能用 --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Sync version from tag
+        shell: pwsh
+        env:
+          VERSION_INPUT: ${{ env.RELEASE_TAG }}
+        run: |
+          $tag = "$env:VERSION_INPUT".Trim()
+          if (-not $tag) { throw '缺少 tag 名（workflow_dispatch 必须填 tag 输入）' }
+          $version = $tag.TrimStart('v')
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version=process.argv[1];fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n')" $version
+          Write-Host "tauri.conf.json version => $version (tag: $tag)"
+
+      - name: Fetch espeak-ng runtime (offline TTS)
+        # 桌面版发音完全离线：内置 espeak-ng（含 espeak-ng-data 与依赖 dll），固定 en-gb 音色。
+        # 不提交二进制到仓库，构建时从官方 release 取 msi 再解包。
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '1.52.0'
+          $msi = Join-Path $env:RUNNER_TEMP 'espeak-ng.msi'
+          $url = "https://github.com/espeak-ng/espeak-ng/releases/download/$version/espeak-ng.msi"
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing
+          $extract = Join-Path $env:RUNNER_TEMP 'espeak-msi'
+          if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          $msiArgs = @('/a', "`"$msi`"", '/qn', "TARGETDIR=`"$extract`"")
+          $proc = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "msiexec 解包失败，退出码 $($proc.ExitCode)" }
+          $exe = Get-ChildItem -Path $extract -Recurse -Filter 'espeak-ng.exe' | Select-Object -First 1
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path $extract -Recurse -Filter '*.exe' | Where-Object { $_.Name -like '*espeak*' } | Select-Object -First 1
+          }
+          if (-not $exe) { throw 'msi 中未找到 espeak-ng.exe' }
+          $src = $exe.Directory.FullName
+          Write-Host "espeak-ng dir: $src"
+          Get-ChildItem $src | ForEach-Object { Write-Host "  $($_.Name)" }
+          $dest = Join-Path $PWD 'src-tauri/resources/espeak-ng'
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item -Path (Join-Path $src '*') -Destination $dest -Recurse -Force
+          if (-not (Test-Path (Join-Path $dest 'espeak-ng-data'))) {
+            $dataDir = Get-ChildItem -Path $extract -Recurse -Directory -Filter 'espeak-ng-data' | Select-Object -First 1
+            if ($dataDir) { Copy-Item -Path $dataDir.FullName -Destination $dest -Recurse -Force }
+            else { throw '未找到 espeak-ng-data 目录' }
+          }
+          $total = (Get-ChildItem $dest -Recurse -File | Measure-Object -Sum Length).Sum
+          Write-Host ("resources/espeak-ng 共 {0:N2} MB" -f ($total / 1MB))
+
+      - name: Fetch piper runtime and en_GB-cori-high voice (offline neural TTS)
+        # 桌面版高质量发音：内置 piper（VITS）+ en_GB-cori-high 模型。
+        # 运行时来自 rhasspy/piper 官方 release，模型来自 HuggingFace（失败时回退 hf-mirror 镜像）。
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = Join-Path $PWD 'src-tauri/resources/piper'
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+          # 1) 运行时：piper.exe + onnxruntime.dll + espeak-ng-data
+          $zip = Join-Path $env:RUNNER_TEMP 'piper_windows_amd64.zip'
+          $rtUrl = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip'
+          Write-Host "downloading $rtUrl"
+          Invoke-WebRequest -Uri $rtUrl -OutFile $zip -UseBasicParsing
+          $rtDir = Join-Path $env:RUNNER_TEMP 'piper-runtime'
+          if (Test-Path $rtDir) { Remove-Item -Recurse -Force $rtDir }
+          Expand-Archive -Path $zip -DestinationPath $rtDir -Force
+          $exe = Get-ChildItem -Path $rtDir -Recurse -Filter 'piper.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'piper 运行时压缩包中未找到 piper.exe' }
+          Write-Host "piper runtime dir: $($exe.Directory.FullName)"
+          Copy-Item -Path (Join-Path $exe.Directory.FullName '*') -Destination $dest -Recurse -Force
+
+          # 2) 语音模型（cori-high，英式英语）
+          $voices = Join-Path $dest 'voices'
+          New-Item -ItemType Directory -Force -Path $voices | Out-Null
+          $tbz = Join-Path $env:RUNNER_TEMP 'vits-piper-en_GB-cori-high.tar.bz2'
+          $urls = @(
+            'https://huggingface.co/4-alokk/piper-voices/resolve/main/vits-piper-en_GB-cori-high.tar.bz2',
+            'https://hf-mirror.com/4-alokk/piper-voices/resolve/main/vits-piper-en_GB-cori-high.tar.bz2'
+          )
+          $downloaded = $false
+          foreach ($url in $urls) {
+            try {
+              Write-Host "downloading $url"
+              Invoke-WebRequest -Uri $url -OutFile $tbz -UseBasicParsing -TimeoutSec 900
+              if ((Get-Item $tbz).Length -gt 50MB) { $downloaded = $true; Write-Host "voice model ok: $url"; break }
+              Write-Host 'file too small, trying next mirror'
+            } catch {
+              Write-Host "download failed: $url -> $($_.Exception.Message)"
+            }
+          }
+          if (-not $downloaded) { throw 'piper 语音模型下载失败（huggingface 与 hf-mirror 都不可用）' }
+
+          # 3) 解包 tar.bz2（优先 7-Zip，Windows 自带 tar 对 bz2 支持不稳定）
+          $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+          if (Test-Path $sevenZip) {
+            & $sevenZip x $tbz "-o$env:RUNNER_TEMP" -y | Out-Null
+            $tar = Get-ChildItem -Path $env:RUNNER_TEMP -Filter 'vits-piper-en_GB-cori-high.tar' | Select-Object -First 1
+            if (-not $tar) { throw '7z 解包 bz2 后未得到 tar 文件' }
+            & $sevenZip x $tar.FullName "-o$voices" -y | Out-Null
+          } else {
+            tar -xjf $tbz -C $voices
+          }
+
+          # 4) 把 onnx 与 onnx.json 统一摊到 voices/ 根目录（Rust 侧按 *.onnx 查找）
+          $found = Get-ChildItem -Path $voices -Filter '*.onnx' -Recurse
+          foreach ($item in $found) {
+            if ($item.DirectoryName -ne $voices) { Copy-Item $item.FullName -Destination $voices -Force }
+            $cfg = "$($item.FullName).json"
+            if ((Test-Path $cfg) -and ((Split-Path $cfg) -ne $voices)) { Copy-Item $cfg -Destination $voices -Force }
+          }
+          $model = Get-ChildItem -Path $voices -Filter '*.onnx' | Select-Object -First 1
+          if (-not $model) { throw '解包后未找到 onnx 模型' }
+          if (-not (Test-Path "$($model.FullName).json")) { throw "缺少模型配置 $($model.Name).json" }
+          Write-Host ("voice model: {0} ({1:N1} MB)" -f $model.Name, ($model.Length / 1MB))
+
+          $total = (Get-ChildItem $dest -Recurse -File | Measure-Object -Sum Length).Sum
+          Write-Host ("resources/piper 共 {0:N2} MB" -f ($total / 1MB))
+
+      - name: Generate app icons
+        # public/favicon.ico 实为 800x800 PNG，tauri icon 可据此生成全套图标（仓库不提交二进制图标）
+        run: pnpm desktop:icon
+
+      - name: Build (pnpm generate + tauri build)
+        run: pnpm desktop:build
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $setup = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Select-Object -First 1
+          if (-not $setup) { throw "未找到 NSIS 安装包" }
+          Copy-Item $setup.FullName "out/$($setup.Name)"
+          Copy-Item "src-tauri/target/release/typewords.exe" "out/TypeWords-portable.exe"
+          Get-ChildItem out | ForEach-Object {
+            "{0}  {1:N2} MB" -f $_.Name, ($_.Length / 1MB) | Write-Host
+          }
+
+      - name: Publish GitHub Release
+        # 不再上传 Actions artifact：直接作为 Release 附件发布
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: TypeWords ${{ env.RELEASE_TAG }}
+          files: out/*.exe
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+          body: |
+            ## TypeWords 桌面版（Windows）
+
+            纯离线构建：启动后不发任何外部网络请求（严格 CSP + 运行时网络守卫）。
+
+            ### 下载哪个
+            - `TypeWords_*_x64-setup.exe` —— NSIS 安装包，按当前用户安装，无需管理员权限
+            - `TypeWords-portable.exe` —— 便携版裸可执行文件，数据保存在 exe 同目录的 `app-data/`
+
+            ### 说明
+            - 发音完全离线：内置 piper（`en_GB-cori-high` 神经语音），失败自动回退 espeak-ng（`en-gb`）
+            - 首次安装需要 WebView2 运行时，缺失时安装器会自动下载
+            - 从网页版迁移数据：首次启动会弹出导入向导，选择网页版导出的 `TypeWords-User-Data-*.zip`
+            - 托盘图标 + `Ctrl + Alt + W` 显示/隐藏主窗口，关闭窗口只是隐藏到托盘
+
+            详细说明见 [README.desktop.md](https://github.com/${{ github.repository }}/blob/${{ env.RELEASE_TAG }}/README.desktop.md)。
+
+      - name: Build summary
+        if: always()
+        shell: pwsh
+        run: |
+          $lines = @(
+            '### TypeWords 桌面版构建',
+            '',
+            '- 前端产物: dist/ (SPA，含 dicts/list/sound/libs/imgs 内嵌资源)',
+            '- 离线发音: piper en_GB-cori-high 优先，回退 espeak-ng (en-gb)',
+            '- 安装包: TypeWords_*_x64-setup.exe (NSIS, currentUser, downloadBootstrapper)',
+            '- 便携版: TypeWords-portable.exe —— 数据保存在 exe 同目录的 app-data/',
+            '- 发布位置: GitHub Release（不再上传 Actions artifact）',
+            ''
+          )
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

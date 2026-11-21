@@ -40,3 +40,16 @@ report.html
 public/vscode
 apps/TypeWordsMiniApp
 *.tsbuildinfo
+
+# Tauri desktop
+src-tauri/target
+src-tauri/gen
+src-tauri/icons/*.png
+src-tauri/icons/*.ico
+src-tauri/icons/*.icns
+src-tauri/app-data
+src-tauri/resources/espeak-ng/*
+!src-tauri/resources/espeak-ng/README.md
+src-tauri/resources/piper/*
+!src-tauri/resources/piper/README.md
+_tmp_desktop

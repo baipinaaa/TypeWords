@@ -14,6 +14,11 @@ import { useI18n } from 'vue-i18n'
 import { Supabase } from '@/core/utils/supabase.ts'
 import MiniProgram from '@/components/MiniProgram.vue'
 import WordCollectPopover from '@/components/word/WordCollectPopover.vue'
+import DesktopDataImportWizard from '@/components/desktop/DesktopDataImportWizard.vue'
+import { isDesktop } from '@/core/utils/desktop.ts'
+
+// 桌面端隐藏小程序推广与 IE 提示
+const desktop = isDesktop()
 
 const router = useRouter()
 const { toggleTheme, getTheme, setTheme } = useTheme()
@@ -91,11 +96,11 @@ function onMouseLeave() {
           <IconFluentBookLetter20Regular />
           <span>{{ $t('articles') }}</span>
         </NuxtLink>
-        <NuxtLink to="/feedback" class="row">
+        <NuxtLink v-if="!desktop" to="/feedback" class="row">
           <IconFluentCommentEdit20Regular />
           <span>{{ $t('feedback') }}</span>
         </NuxtLink>
-        <NuxtLink to="/doc" class="row">
+        <NuxtLink v-if="!desktop" to="/doc" class="row">
           <IconFluentDocument20Regular />
           <span>{{ $t('document') }}</span>
         </NuxtLink>
@@ -144,7 +149,10 @@ function onMouseLeave() {
       </div>
     </div>
 
-    <IeDialog />
+    <IeDialog v-if="!desktop" />
+
+    <!-- 桌面端：首启/手动数据导入向导（自带首启判定，见组件内 detectFirstRun） -->
+    <DesktopDataImportWizard v-if="desktop" />
 
     <div class="flex-1 z-1 relative main-content overflow-x-hidden">
       <div
@@ -164,7 +172,7 @@ function onMouseLeave() {
       <router-view></router-view>
 
       <div class="absolute right-4 top-4 flex z-1 gap-2" v-if="showIcon">
-        <MiniProgram v-if="settingStore.load && !settingStore.first" />
+        <MiniProgram v-if="!desktop && settingStore.load && !settingStore.first" />
 
         <div class="relative group">
           <BaseIcon>

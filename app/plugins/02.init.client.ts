@@ -2,9 +2,12 @@
 import VueVirtualScroller from 'vue-virtual-scroller'
 import { ENV } from '@/core/config/env.ts'
 import { withAppBaseURL } from '@/core/utils/base-url'
+import { isDesktop } from '@/core/utils/desktop'
 
 export default defineNuxtPlugin(async nuxtApp => {
+  // 桌面端不注入第三方统计脚本（离线优先，且 tauri.localhost 并不代表本机开发环境）
   if (
+    !isDesktop() &&
     !location.href.includes('localhost') &&
     !location.href.includes('192.168') &&
     !location.href.includes('172.16') &&
@@ -17,7 +20,9 @@ export default defineNuxtPlugin(async nuxtApp => {
     })()
   }
 
-  if ('serviceWorker' in navigator) {
+  // 桌面端不注册 Service Worker：自定义协议下 SW 注册请求永不响应（tauri#12214），
+  // 且项目 public/ 下并无 service-worker.js
+  if (!isDesktop() && 'serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker
         .register(withAppBaseURL('/service-worker.js'))

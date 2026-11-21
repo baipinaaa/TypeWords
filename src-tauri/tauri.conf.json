@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TypeWords",
+  "version": "1.0.0",
+  "identifier": "cc.typewords.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:5567",
+    "beforeBuildCommand": "pnpm generate",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "appDirectoriesOverride": "./app-data",
+    "windows": [
+      {
+        "label": "main",
+        "title": "TypeWords",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "center": true,
+        "visible": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost blob: data:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'",
+      "devCsp": "default-src 'self' http://localhost:5567 ws://localhost:5567 ipc: http://ipc.localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: http://localhost:5567; style-src 'self' 'unsafe-inline' http://localhost:5567; img-src 'self' data: blob: http://localhost:5567; media-src 'self' data: blob: http://localhost:5567; font-src 'self' data: http://localhost:5567; connect-src 'self' ipc: http://ipc.localhost blob: data: http://localhost:5567 ws://localhost:5567; worker-src 'self' blob:; frame-src 'none'; object-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "compression": "lzma",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ]
+      }
+    },
+    "resources": [
+      "resources/espeak-ng/**/*",
+      "resources/piper/**/*"
+    ]
+  },
+  "plugins": {}
+}

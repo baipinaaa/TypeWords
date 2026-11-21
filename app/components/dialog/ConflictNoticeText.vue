@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { jump2Feedback } from '@/core/utils'
 import WeChat from '@/components/channel-icons/WeChat.vue'
+import { isDesktop } from '@/core/utils/desktop'
 
 withDefaults(
   defineProps<{
@@ -13,7 +14,8 @@ withDefaults(
 </script>
 
 <template>
-  <div class="text">
+  <!-- 桌面版（WebView2）不存在浏览器插件冲突/扩展拦截的场景 -->
+  <div v-if="!isDesktop()" class="text">
     <div class="title" v-if="type === 'all'">{{ $t('conflict_notice_title') }}</div>
     <ul>
       <li v-if="type === 'all' || type === 'keyboard'">

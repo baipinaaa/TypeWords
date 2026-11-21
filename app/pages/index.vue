@@ -555,8 +555,8 @@ useSeoMeta({
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/l/font?kit=XoHg2Y_-T6Oo88RDZSQPp2sshj3I9QTcqzw&skey=509bbab0bec2784f&v=v18)
-    format('woff2');
+  /* 离线/桌面版不做远程字体请求：无本地 Garamond 时直接回退到 Georgia / 系统衬线字体 */
+  src: local('Garamond'), local('EB Garamond'), local('Georgia');
 }
 
 /* Hero 标题艺术字体 */

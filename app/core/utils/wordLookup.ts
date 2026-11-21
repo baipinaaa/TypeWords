@@ -1,5 +1,6 @@
 import { queryWord } from '../apis/words.ts'
 import type { Word } from '../types/types.ts'
+import { isDesktop } from './desktop.ts'
 
 const lookupCache = new Map<string, Word | null>()
 
@@ -23,6 +24,9 @@ export async function resolveWordLookup(rawWord: string): Promise<WordLookupReso
   const query = rawWord.trim()
   const candidates = normalizeWordForLookup(rawWord)
   if (!query) return { query: '', candidates, data: null }
+
+  // 桌面版纯离线：查词接口（ENV.API 默认 http://localhost/）不可用，直接返回空，不发请求
+  if (isDesktop()) return { query, candidates, data: null }
 
   if (lookupCache.has(query)) {
     return { query, candidates, data: lookupCache.get(query) ?? null }

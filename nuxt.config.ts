@@ -61,7 +61,10 @@ export default defineNuxtConfig({
       link: [{ rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }],
     },
   },
-  // ssr: false,
+  // Tauri 桌面构建走纯 SPA（NUXT_DESKTOP=1），网页构建保持原有 SSR/prerender 行为
+  ssr: process.env.NUXT_DESKTOP === '1' ? false : undefined,
+  // 忽略 Rust 工程，避免 Nuxt 扫描/监听 src-tauri
+  ignore: ['**/src-tauri/**'],
   routeRules: {
     '/words': { ssr: false },
     '/articles': { ssr: false },
@@ -72,6 +75,8 @@ export default defineNuxtConfig({
     '/book/nce4': { prerender: true },
   },
   vite: {
+    clearScreen: false,
+    envPrefix: ['VITE_', 'TAURI_ENV_'],
     plugins: [
       Components({
         resolvers: [
@@ -159,6 +164,9 @@ export default defineNuxtConfig({
   },
   devServer: {
     port: 5567,
+    // Tauri 的 devUrl 固定为 http://localhost:5567，禁止端口漂移
+    host: '0',
+    strictPort: true,
   },
   nitro: {
     prerender: {

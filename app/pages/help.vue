@@ -3,6 +3,9 @@ import { BasePage, Collapse } from '@/base'
 import WeChat from '@/components/channel-icons/WeChat.vue'
 import { APP_NAME, GITHUB, Origin } from '@/core/config/env.ts'
 import ConflictNoticeText from '@/components/dialog/ConflictNoticeText.vue'
+import { isDesktop } from '@/core/utils/desktop'
+
+const desktop = isDesktop()
 
 let title = APP_NAME + ' 常见问题解答'
 let route = useRoute()
@@ -92,17 +95,18 @@ useSeoMeta({
           <div class="line"></div>
 
           <Collapse :q="$t('qa13_a')" :a="[$t('qa13_q1'), $t('qa13_q2'), $t('qa13_q3'), $t('qa13_q4')]">
-            <div class="flex items-center">
+            <div v-if="!desktop" class="flex items-center">
               {{ $t('wechat_group') }}：
               <WeChat />
             </div>
-            <p>
+            <p v-if="!desktop">
               {{ $t('github_address') }}： <a :href="GITHUB" target="_blank">{{ GITHUB }}</a>
             </p>
-            <div class="">
+            <div v-if="!desktop" class="">
               {{ $t('about_ticket_feedback')
               }}<a :href="`https://v.wjx.cn/vm/ev0W7fv.aspx#`" target="_blank">https://v.wjx.cn/vm/ev0W7fv.aspx#</a>
             </div>
+            <div v-if="desktop" class="color-gray">桌面版为离线版本，不提供在线反馈与交流渠道。</div>
           </Collapse>
         </div>
       </div>

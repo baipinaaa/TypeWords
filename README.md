@@ -31,6 +31,10 @@
 
 <https://typewords.cc>
 
+## Desktop App (Windows)
+
+A Tauri 2 desktop build is available: the same Nuxt static bundle running inside WebView2, with a portable data directory (`app-data/` next to the exe), **fully offline — no external requests at all** (strict CSP + runtime network guard; pronunciation is synthesized locally by a bundled **piper** neural voice (`en_GB-cori-high`, British English) with **espeak-ng** as automatic fallback), tray icon and a `Ctrl+Alt+W` global shortcut. Windows installers are produced by GitHub Actions on tag push — see [README.desktop.md](./README.desktop.md) for build, migration and verification details.
+
 <img width="1920" height="1440" alt="practice words" src="/public/imgs/words.png" />
 <img width="1920" height="1440" alt="practice articles" src="/public/imgs/articles.png" />
 

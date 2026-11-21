@@ -7,11 +7,14 @@ import { usePlayWordAudio } from '@/core/hooks/sound.ts'
 import { closeWordLookup, wordLookupState } from '@/core/hooks/useWordLookup.ts'
 import { openWordCollectPicker } from '@/core/hooks/useWordCollectPicker.ts'
 import { getDefaultWord } from '@/core/types/func.ts'
+import { isDesktop } from '@/core/utils/desktop'
 import TranslationList from './TranslationList.vue'
 
 const { t: $t } = useI18n()
 const settingStore = useSettingStore()
 const playWordAudio = usePlayWordAudio()
+// 桌面版为纯离线版本：不渲染第三方词典 iframe，也不给外部跳转入口
+const desktop = isDesktop()
 const popover = ref<HTMLElement | null>(null)
 const dictionaryTabs = [
   { value: 'youdao', label: '有道词典' },
@@ -26,7 +29,7 @@ const dictionaryUrl = computed(() => {
     : `https://dict.youdao.com/result?word=${word}&lang=en`
 })
 
-const isExternalLookup = computed(() => !wordLookupState.loading && wordLookupState.notFound)
+const isExternalLookup = computed(() => !desktop && !wordLookupState.loading && wordLookupState.notFound)
 const style = computed(() => ({
   left: isExternalLookup.value ? '50%' : `${wordLookupState.x}px`,
   top: isExternalLookup.value ? '50%' : `${wordLookupState.y}px`,
@@ -157,7 +160,7 @@ watch(
           </div>
           <div class="mt-1 mb-3 flex items-center gap-3 flex-wrap text-sm">
             <span class="color-gray">暂未收录</span>
-            <div role="tablist" aria-label="查词词典" class="dictionary-tabs ml-auto">
+            <div v-if="!desktop" role="tablist" aria-label="查词词典" class="dictionary-tabs ml-auto">
               <button
                 v-for="tab in dictionaryTabs"
                 :id="`word-lookup-tab-${tab.value}`"
@@ -174,9 +177,12 @@ watch(
                 {{ tab.label }}
               </button>
             </div>
-            <a :href="dictionaryUrl" target="_blank" rel="noopener noreferrer" class="text-link">在新窗口打开</a>
+            <a v-if="!desktop" :href="dictionaryUrl" target="_blank" rel="noopener noreferrer" class="text-link"
+              >在新窗口打开</a
+            >
           </div>
           <div
+            v-if="!desktop"
             id="word-lookup-dictionary-panel"
             role="tabpanel"
             :aria-labelledby="`word-lookup-tab-${activeDictionary}`"
@@ -189,6 +195,9 @@ watch(
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
               referrerpolicy="no-referrer"
             />
+          </div>
+          <div v-if="desktop" class="mb-1 text-sm color-gray">
+            桌面版为离线版本，内置词表未收录该词，且不支持联网查询。
           </div>
         </template>
         <template v-else-if="wordLookupState.data">

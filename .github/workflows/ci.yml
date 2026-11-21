@@ -1,0 +1,104 @@
+name: CI
+
+# 快速门禁：只验证「前端能生成静态产物」+「Rust 侧能通过 cargo check」，
+# 不做完整打包（完整打包见 release.yml，耗时约 15-25 分钟）。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  NUXT_DESKTOP: '1'
+  NUXT_TELEMETRY_DISABLED: '1'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web-build:
+    name: Web (nuxt generate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: nuxt generate (desktop SPA mode)
+        run: pnpm generate
+
+      - name: Verify static output
+        run: |
+          ls dist
+          for p in dist/index.html dist/dicts dist/list dist/sound dist/libs dist/imgs; do
+            test -e "$p" || { echo "缺少 $p"; exit 1; }
+          done
+          test -f dist/dicts/en/word/CET4_T.json || { echo "缺少词库样例 CET4_T.json"; exit 1; }
+          echo "静态产物校验通过"
+
+  rust-check:
+    name: Rust (cargo check)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # tauri-build 编译期会为 Windows exe 生成资源，需要真实可解析的 icon.ico，
+      # 因此与其他二进制图标一样，在 CI 里由 tauri icon 现场生成（仓库不提交图标）
+      - name: Generate app icons
+        run: pnpm desktop:icon
+
+      # espeak-ng 运行时只在 release.yml 里下载解包（约 12MB），门禁里只需让
+      # bundle.resources 的 glob 有匹配，避免 tauri-build 因空目录报错。
+      - name: Stub espeak-ng / piper resources
+        shell: pwsh
+        run: |
+          foreach ($dest in @('src-tauri/resources/espeak-ng', 'src-tauri/resources/piper')) {
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            Set-Content -Path (Join-Path $dest '.placeholder') -Value 'stub'
+          }
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets

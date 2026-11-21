@@ -4,9 +4,11 @@ import { ENV, SoundFileOptions } from '@/core/config/env.ts'
 import { useWindowClick } from '@/core/hooks/event.ts'
 import { getAudioFileUrl, usePlayAudio } from '@/core/hooks/sound.ts'
 import { useSettingStore } from '@/core/stores/setting.ts'
+import { isDesktop } from '@/core/utils/desktop.ts'
 import { emitter, EventKey } from '@/core/utils/eventBus'
 
 const settingStore = useSettingStore()
+const desktop = isDesktop()
 let timer: any = 0
 //停止切换事件，因为hover到select时会跳出mini-dialog
 let selectIsOpen = false
@@ -61,13 +63,19 @@ function eventCheck(e) {
           <Switch v-model="settingStore.wordSound" />
         </div>
       </div>
-      <div class="mini-row">
+      <div class="mini-row" v-if="!desktop">
         <label class="item-title">{{ $t('pronunciation_accent') }}</label>
         <div class="wrapper">
           <Select v-model="settingStore.soundType" @toggle="selectToggle" placeholder="请选择" size="small">
             <Option label="美音" value="us" />
             <Option label="英音" value="uk" />
           </Select>
+        </div>
+      </div>
+      <div class="mini-row" v-else>
+        <label class="item-title">{{ $t('pronunciation_accent') }}</label>
+        <div class="wrapper">
+          <span class="text-sm color-gray">英音 en-GB</span>
         </div>
       </div>
 

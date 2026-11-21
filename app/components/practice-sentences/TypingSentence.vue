@@ -8,6 +8,7 @@ import type { ArticleWord, Sentence, WordSubContent } from '@/core/types/types.t
 import { getDefaultSentence } from '@/core/types/func.ts'
 import ContextMenu from '@imengyu/vue3-context-menu'
 import '@imengyu/vue3-context-menu/lib/vue3-context-menu.css'
+import { isDesktop } from '@/core/utils/desktop'
 import { useI18n } from 'vue-i18n'
 import TypingSentenceItem from './TypingSentenceItem.vue'
 import { parseSentence } from '@/core/hooks/article.ts'
@@ -97,34 +98,39 @@ function onContextMenu(e: MouseEvent, word: ArticleWord, wordIndex: number) {
         label: $t('play_sentence'),
         onClick: play,
       },
-      {
-        label: $t('grammar_analysis'),
-        onClick: () => {
-          navigator.clipboard.writeText(data.text).then(() => {
-            Toast.success($t('copied_open_grammar'))
-            setTimeout(() => {
-              window.open('https://enpuz.com/')
-            }, 1000)
-          })
-        },
-      },
-      {
-        label: $t('youdao_translate'),
-        children: [
-          {
-            label: $t('translate_word'),
-            onClick: () => {
-              window.open(`https://www.youdao.com/result?word=${word.word}&lang=en`, '_blank')
+      // 桌面版为离线版本：语法分析（enpuz）与有道翻译都需要联网，不提供
+      ...(isDesktop()
+        ? []
+        : [
+            {
+              label: $t('grammar_analysis'),
+              onClick: () => {
+                navigator.clipboard.writeText(data.text).then(() => {
+                  Toast.success($t('copied_open_grammar'))
+                  setTimeout(() => {
+                    window.open('https://enpuz.com/')
+                  }, 1000)
+                })
+              },
             },
-          },
-          {
-            label: $t('translate_sentence'),
-            onClick: () => {
-              window.open(`https://www.youdao.com/result?word=${data.text}&lang=en`, '_blank')
+            {
+              label: $t('youdao_translate'),
+              children: [
+                {
+                  label: $t('translate_word'),
+                  onClick: () => {
+                    window.open(`https://www.youdao.com/result?word=${word.word}&lang=en`, '_blank')
+                  },
+                },
+                {
+                  label: $t('translate_sentence'),
+                  onClick: () => {
+                    window.open(`https://www.youdao.com/result?word=${data.text}&lang=en`, '_blank')
+                  },
+                },
+              ],
             },
-          },
-        ],
-      },
+          ]),
     ],
   })
 }

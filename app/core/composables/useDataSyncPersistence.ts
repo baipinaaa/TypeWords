@@ -508,6 +508,20 @@ export function useDataSyncPersistence() {
     return syncResult
   }
 
+  /**
+   * 只写本地（不碰网络）：把一个完整的备份数据落到 IndexedDB。
+   * 供桌面版（离线优先，无 Supabase）的数据导入使用。
+   */
+  async function persistBackupLocally(data: BackupData['val']): Promise<void> {
+    const updated_at = new Date().toISOString()
+    await persistLocalState(SyncDataType.dict, data.dict.val, updated_at)
+    await persistLocalState(SyncDataType.setting, data.setting.val, updated_at)
+    //@ts-ignore
+    await persistLocalState(SyncDataType.practice_word, data?.[PRACTICE_WORD_CACHE.key]?.val ?? null, updated_at)
+    //@ts-ignore
+    await persistLocalState(SyncDataType.practice_article, data?.[PRACTICE_ARTICLE_CACHE.key]?.val ?? null, updated_at)
+  }
+
   async function pullAllRemoteToLocal(client?: SupabaseClient | null): Promise<boolean> {
     const sb = getSyncClient(client)
     if (!sb) return false
@@ -606,6 +620,7 @@ export function useDataSyncPersistence() {
     getRemoteMeta,
     saveDictState,
     forcePushLocalDataToRemote,
+    persistBackupLocally,
     pullAllRemoteToLocal,
     getLocalCompactDataByType,
     syncData,
