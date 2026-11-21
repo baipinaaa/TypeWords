@@ -229,7 +229,7 @@ jobs:
           $total = (Get-ChildItem $pkg -Recurse -File | Measure-Object -Sum Length).Sum
           Write-Host ("便携目录总大小 {0:N2} MB" -f ($total / 1MB))
 
-      - name: Pack portable archive (7z + zstd, max)
+      - name: Pack portable archive (7z + LZMA2, max)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
@@ -245,16 +245,19 @@ jobs:
           if (Test-Path $archive) { Remove-Item $archive -Force }
 
           Push-Location out
-          # -t7z 容器 + zstd 编码器 + level 22（极限）+ 2 线程限制内存（level 22 每线程约 1.3GB）
-          & $sevenZip a -t7z -m0=zstd -mx=22 -mmt=2 -y $archive 'TypeWords'
+          # LZMA2 极限压缩：192MB 字典 + bt4 + fb=273；
+          # -mmt=1 让 solid 块保持完整，压缩率最高（代价是耗时，约 3-6 分钟）
+          & $sevenZip a -t7z -m0=lzma2 -md=192m -mfb=273 -mmf=bt4 -mx=9 -mmt=1 -y $archive 'TypeWords'
           $code = $LASTEXITCODE
-          if ($code -ne 0 -or -not (Test-Path $archive)) {
-            Write-Host "zstd 压缩失败（7z 可能不支持 zstd 编码），回退到 LZMA2 -mx=9"
-            if (Test-Path $archive) { Remove-Item $archive -Force }
-            & $sevenZip a -t7z -mx=9 -mmt=on -y $archive 'TypeWords'
-            $code = $LASTEXITCODE
-          }
           Pop-Location
+          if ($code -ne 0 -or -not (Test-Path $archive)) {
+            Write-Host "LZMA2 极限参数失败（退出码 $code），回退到 -mx=9 默认参数"
+            if (Test-Path $archive) { Remove-Item $archive -Force }
+            Push-Location out
+            & $sevenZip a -t7z -mx=9 -mmt=1 -y $archive 'TypeWords'
+            $code = $LASTEXITCODE
+            Pop-Location
+          }
           if ($code -ne 0 -or -not (Test-Path $archive)) { throw "7z 打包失败，退出码 $code" }
 
           $item = Get-Item $archive
@@ -276,7 +279,7 @@ jobs:
             纯离线构建：启动后不发任何外部网络请求（严格 CSP + 运行时网络守卫）。
 
             ### 下载
-            - `TypeWords-${{ env.RELEASE_TAG }}-windows-x64-portable.7z` —— 便携版（7z + zstd 极限压缩）
+            - `TypeWords-${{ env.RELEASE_TAG }}-windows-x64-portable.7z` —— 便携版（7z + LZMA2 极限压缩，192MB 字典）
 
             ### 使用
             1. 用 7-Zip 解压到**纯英文路径**（例如 `D:\TypeWords`）。离线发音依赖 espeak-ng 系的单字节文件接口，路径含中文会导致发音失败。
@@ -301,7 +304,7 @@ jobs:
             '',
             '- 前端产物: dist/ (SPA，含 dicts/list/sound/libs/imgs 内嵌资源)',
             '- 离线发音: piper en_GB-cori-high 优先，回退 espeak-ng (en-gb)',
-            '- 发布产物: TypeWords-<tag>-windows-x64-portable.7z（7z + zstd 极限压缩）',
+            '- 发布产物: TypeWords-<tag>-windows-x64-portable.7z（7z + LZMA2 极限压缩）',
             '- 包内内容: TypeWords.exe + resources/piper + resources/espeak-ng + README.desktop.md',
             '- 不再发布 NSIS 安装包',
             '- 发布位置: GitHub Release（不上传 Actions artifact）',
