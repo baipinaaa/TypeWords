@@ -5,7 +5,7 @@ import { ref } from 'vue'
 import { ENV, PronunciationApi, SoundFileOptions } from '../config/env'
 import { Toast } from '@/base'
 import { isDesktop } from '../utils/desktop'
-import { cancelEspeakAudio, isEspeakAvailable, playEspeak } from './espeak'
+import { cancelEspeakAudio, isEspeakAvailable, logTtsDebug, playEspeak } from './espeak'
 import { cancelPiperAudio, isPiperAvailable, playPiper } from './piper'
 import { getDesktopTtsEngine } from './desktop-tts'
 
@@ -222,10 +222,12 @@ export function usePlayWordAudio() {
 
     // 桌面版（离线）：不请求有道发音，改用内置 espeak-ng（en-gb）合成
     if (isDesktop()) {
+      logTtsDebug('playAudio.desktop', `${word} rate=${playbackRate}`)
       useTTsPlayAudio().play(word, { rate: playbackRate, onEnd: onended })
       onPlay?.()
       return
     }
+    logTtsDebug('playAudio.web', `${word} rate=${playbackRate}`)
 
     let url = `${PronunciationApi}${word}&type=2`
     if (settingStore.soundType === 'uk') {
@@ -305,6 +307,7 @@ export function useTTsPlayAudio() {
   function play(text: string, options: TTsPlayOptions = {}) {
     if (!text) return
     // 桌面版（离线）：piper（en-GB cori-high）优先 → espeak-ng 兜底 → 系统 TTS
+    logTtsDebug('play.enter', `desktop=${isEspeakAvailable()} text=${text.slice(0, 24)}`)
     if (isEspeakAvailable()) {
       void playDesktopTtsChain(text, options)
       return
@@ -324,18 +327,24 @@ export function useTTsPlayAudio() {
     }
 
     // 用户选的引擎优先，失败后回退到另一个，两个都不行再用系统 TTS
+    logTtsDebug('chain.start', `engine=${getDesktopTtsEngine()} piper=${isPiperAvailable()} espeak=${isEspeakAvailable()}`)
     if (getDesktopTtsEngine() === 'espeak') {
       if (isEspeakAvailable() && (await playEspeak(text, sharedOptions))) return
+      logTtsDebug('chain.espeak-fail', text.slice(0, 24))
       if (generation !== ttsPlaybackGeneration) return
       if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
+      logTtsDebug('chain.piper-fail', text.slice(0, 24))
       if (generation !== ttsPlaybackGeneration) return
     } else {
       if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
+      logTtsDebug('chain.piper-fail', text.slice(0, 24))
       if (generation !== ttsPlaybackGeneration) return
       if (isEspeakAvailable() && (await playEspeak(text, sharedOptions))) return
+      logTtsDebug('chain.espeak-fail', text.slice(0, 24))
       if (generation !== ttsPlaybackGeneration) return
     }
     // 内置引擎都不可用（如资源缺失）时，回退到 WebView2 的系统 TTS
+    logTtsDebug('chain.speechSynthesis', text.slice(0, 24))
     playWithSpeechSynthesis(text, options)
   }
 

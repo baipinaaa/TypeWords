@@ -21,6 +21,28 @@ const pendingCache = new Map<string, Promise<string | null>>()
 let activeAudio: HTMLAudioElement | null = null
 let playbackToken = 0
 
+const DEBUG_KEY = 'typewords:tts-debug'
+
+/**
+ * 把语音链路的关键状态记到 localStorage（最多 24 条环缓冲）。
+ * 桌面版没有 devtools，这个是现场排查「为什么没声音」的唯一线索。
+ */
+export function logTtsDebug(step: string, detail?: unknown) {
+  try {
+    const raw = localStorage.getItem(DEBUG_KEY)
+    const list: any[] = raw ? JSON.parse(raw) : []
+    let text = ''
+    if (detail !== undefined && detail !== null) {
+      text = typeof detail === 'string' ? detail : String(detail)
+    }
+    list.push({ t: Date.now(), step, detail: text.slice(0, 160) })
+    while (list.length > 24) list.shift()
+    localStorage.setItem(DEBUG_KEY, JSON.stringify(list))
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 是否处在可以调用 Tauri IPC 的桌面环境 */
 export function isDesktopTtsAvailable(): boolean {
   if (typeof window === 'undefined') return false
@@ -59,6 +81,7 @@ async function requestWavBlob(command: string, text: string, speed: number): Pro
     return toWavBlob(payload)
   } catch (error) {
     console.warn(`[desktop-tts] ${command} 合成失败`, error)
+    logTtsDebug('synth.fail', `${command} ${String(error)}`)
     return null
   }
 }
@@ -128,10 +151,17 @@ export async function playDesktopTts(
   if (!content || typeof Audio === 'undefined') return false
 
   const token = ++playbackToken
+  logTtsDebug('play.enter', `${command} speed=${speedFromRate(options.rate)} text=${content.slice(0, 24)}`)
   const url = await getDesktopTtsWavUrl(command, content, options.rate)
   // 已被后一次播放取代：不算失败，也不再回调 onEnd
-  if (token !== playbackToken) return true
-  if (!url) return false
+  if (token !== playbackToken) {
+    logTtsDebug('play.superseded', command)
+    return true
+  }
+  if (!url) {
+    logTtsDebug('play.no-url', command)
+    return false
+  }
 
   if (activeAudio) {
     try {
@@ -164,6 +194,7 @@ export async function playDesktopTts(
     return true
   } catch (error) {
     console.warn(`[desktop-tts] ${command} 播放失败`, error)
+    logTtsDebug('play.fail', `${command} ${String(error)}`)
     if (activeAudio === audio) activeAudio = null
     finished = true
     return false

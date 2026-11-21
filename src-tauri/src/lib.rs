@@ -26,8 +26,7 @@ const PIPER_MAX_CHARS: usize = 4000;
 const PIPER_MIN_LENGTH_SCALE: f32 = 0.6;
 const PIPER_MAX_LENGTH_SCALE: f32 = 2.0;
 
-fn espeak_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
+fn espeak_root(app: &AppHandle) -> Result<PathBuf, String> {    let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(dir) = app.path().resource_dir() {
         candidates.push(dir.join("resources").join("espeak-ng"));
     }
@@ -57,6 +56,38 @@ fn require_ascii(path: &Path, what: &str) -> Result<(), String> {
             path.display()
         ))
     }
+}
+
+/// 语音链路的诊断日志：写到 `<app_cache_dir>/tts.log`，一次性回答
+/// 「前端到底有没有调用合成、失败在哪一步」。最多保留最近 200KB。
+fn tts_log(app: &AppHandle, line: &str) {
+    let Ok(dir) = app.path().app_cache_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("tts.log");
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > 200 * 1024 {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(file, "[{secs}] {line}");
+    }
+}
+
+fn tts_preview(text: &str) -> String {
+    let mut preview: String = text.chars().take(48).collect();
+    if text.chars().count() > 48 {
+        preview.push('…');
+    }
+    preview
 }
 
 /// 合成中间文件路径（唯一名，避免并发互相覆盖）
@@ -133,6 +164,10 @@ async fn espeak_speak(
     let speed = speed
         .unwrap_or(ESPEAK_DEFAULT_SPEED)
         .clamp(80, 450);
+    tts_log(
+        &app,
+        &format!("espeak call speed={speed} text={}", tts_preview(&text)),
+    );
 
     let cache_dir = app
         .path()
@@ -169,8 +204,20 @@ async fn espeak_speak(
         }
         Ok::<Vec<u8>, String>(bytes)
     })
-    .await
-    .map_err(|err| format!("语音合成任务异常: {err}"))??;
+    .await;
+    let bytes = match bytes {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(err)) => {
+            tts_log(&app, &format!("espeak fail: {err}"));
+            return Err(err);
+        }
+        Err(err) => {
+            let message = format!("语音合成任务异常: {err}");
+            tts_log(&app, &format!("espeak fail: {message}"));
+            return Err(message);
+        }
+    };
+    tts_log(&app, &format!("espeak ok bytes={}", bytes.len()));
 
     Ok(Response::new(bytes))
 }
@@ -306,6 +353,10 @@ async fn piper_speak(app: AppHandle, text: String, speed: Option<i32>) -> Result
         text = text.chars().take(PIPER_MAX_CHARS).collect();
     }
     let speed = speed.unwrap_or(PIPER_DEFAULT_SPEED).clamp(80, 450);
+    tts_log(
+        &app,
+        &format!("piper call speed={speed} text={}", tts_preview(&text)),
+    );
 
     let cache_dir = app
         .path()
@@ -345,8 +396,20 @@ async fn piper_speak(app: AppHandle, text: String, speed: Option<i32>) -> Result
         }
         Ok::<Vec<u8>, String>(bytes)
     })
-    .await
-    .map_err(|err| format!("语音合成任务异常: {err}"))??;
+    .await;
+    let bytes = match bytes {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(err)) => {
+            tts_log(&app, &format!("piper fail: {err}"));
+            return Err(err);
+        }
+        Err(err) => {
+            let message = format!("语音合成任务异常: {err}");
+            tts_log(&app, &format!("piper fail: {message}"));
+            return Err(message);
+        }
+    };
+    tts_log(&app, &format!("piper ok bytes={}", bytes.len()));
 
     Ok(Response::new(bytes))
 }
