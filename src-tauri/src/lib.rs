@@ -45,6 +45,76 @@ fn espeak_root(app: &AppHandle) -> Result<PathBuf, String> {
     Err("未找到内置的 espeak-ng 运行时（resources/espeak-ng）".to_string())
 }
 
+/// 递归复制目录（用于把 espeak-ng-data 搬到纯 ASCII 路径）
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+/// espeak-ng / piper 内部用单字节 fopen 打开 data 文件，安装路径含中文时会报
+/// `Error processing file '...\espeak-ng-data\phontab': Illegal byte sequence`，
+/// 导致整个发音链路静默失败。这里统一准备一个纯 ASCII 的工作目录：
+/// 优先 `%ProgramData%\TypeWords\tts`（普通用户可写），退化到 `%TEMP%\TypeWords-tts`。
+fn ascii_work_dir() -> Result<PathBuf, String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(base) = std::env::var_os("ProgramData") {
+        candidates.push(PathBuf::from(base).join("TypeWords").join("tts"));
+    }
+    if let Some(base) = std::env::var_os("TEMP") {
+        candidates.push(PathBuf::from(base).join("TypeWords-tts"));
+    }
+    candidates.push(PathBuf::from("C:\\ProgramData\\TypeWords\\tts"));
+
+    for dir in candidates {
+        if !dir.to_string_lossy().is_ascii() {
+            continue;
+        }
+        if std::fs::create_dir_all(&dir).is_ok() {
+            return Ok(dir);
+        }
+    }
+    Err("无法创建纯英文的语音工作目录（请检查 %ProgramData% 的写入权限）".to_string())
+}
+
+/// 让 espeak-ng-data 落在一个纯 ASCII 目录里。
+/// 返回 `(espeak-ng-data 的父目录, espeak-ng-data 目录本身)`：
+/// piper 的 `ESPEAK_DATA_PATH` 要给父目录（它自己会拼 `espeak-ng-data`），
+/// espeak-ng.exe 的 `ESPEAK_DATA_PATH` 要给 data 目录本身。
+fn ensure_espeak_data(root: &Path, tag: &str) -> Result<(PathBuf, PathBuf), String> {
+    let src = root.join("espeak-ng-data");
+    if !src.is_dir() {
+        return Err(format!("缺少 espeak-ng-data 目录: {}", src.display()));
+    }
+    if root.to_string_lossy().is_ascii() {
+        return Ok((root.to_path_buf(), src));
+    }
+    let base = ascii_work_dir()?.join(tag);
+    let dst = base.join("espeak-ng-data");
+    if !dst.join("phontab").exists() {
+        copy_dir_all(&src, &dst).map_err(|err| format!("复制 espeak-ng-data 到英文目录失败: {err}"))?;
+    }
+    Ok((base, dst))
+}
+
+/// 合成中间文件路径（唯一名，避免并发互相覆盖）
+fn temp_wav_path(work: &Path, tag: &str, key: u64) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    work.join(format!("{tag}-{key:016x}-{nanos}.wav"))
+}
+
 fn wav_cache_key(text: &str, speed: i32) -> u64 {
     let mut hasher = DefaultHasher::new();
     ESPEAK_VOICE.hash(&mut hasher);
@@ -55,6 +125,8 @@ fn wav_cache_key(text: &str, speed: i32) -> u64 {
 
 fn synthesize_wav(
     root: &Path,
+    data_dir: &Path,
+    work: &Path,
     text: &str,
     speed: i32,
     out_wav: &Path,
@@ -65,7 +137,11 @@ fn synthesize_wav(
     } else {
         text.to_string()
     };
+    // 参数与输出路径全部保持 ASCII：espeak-ng 内部用单字节 fopen 打开路径
+    // ESPEAK_DATA_PATH / --path 的语义是「包含 espeak-ng-data 的父目录」
+    let data_home = data_dir.parent().unwrap_or(data_dir);
     let output = Command::new(root.join("espeak-ng.exe"))
+        .arg(format!("--path={}", data_home.display()))
         .arg("-v")
         .arg(ESPEAK_VOICE)
         .arg("-s")
@@ -73,8 +149,8 @@ fn synthesize_wav(
         .arg("-w")
         .arg(out_wav)
         .arg(&payload)
-        .env("ESPEAK_DATA_PATH", root)
-        .current_dir(root)
+        .env("ESPEAK_DATA_PATH", data_home)
+        .current_dir(work)
         .output()
         .map_err(|err| format!("启动 espeak-ng 失败: {err}"))?;
     if !output.status.success() {
@@ -112,23 +188,33 @@ async fn espeak_speak(
         .join("espeak-wav");
     std::fs::create_dir_all(&cache_dir).map_err(|err| format!("创建缓存目录失败: {err}"))?;
 
-    let wav_path = cache_dir.join(format!("{:016x}.wav", wav_cache_key(&text, speed)));
-    if !wav_path.exists() {
-        let root = espeak_root(&app)?;
-        let root_for_task = root.clone();
-        let text_for_task = text.clone();
-        let wav_for_task = wav_path.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            synthesize_wav(&root_for_task, &text_for_task, speed, &wav_for_task)
-        })
-        .await
-        .map_err(|err| format!("语音合成任务异常: {err}"))??;
+    let cache_key = wav_cache_key(&text, speed);
+    let wav_path = cache_dir.join(format!("{cache_key:016x}.wav"));
+    if wav_path.exists() {
+        if let Ok(bytes) = std::fs::read(&wav_path) {
+            if !bytes.is_empty() {
+                return Ok(Response::new(bytes));
+            }
+        }
     }
 
-    let bytes = std::fs::read(&wav_path).map_err(|err| format!("读取音频失败: {err}"))?;
-    if bytes.is_empty() {
-        return Err("espeak-ng 输出为空".to_string());
-    }
+    let root = espeak_root(&app)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let (_data_base, data_dir) = ensure_espeak_data(&root, "espeak-ng")?;
+        let work = ascii_work_dir()?;
+        let tmp_wav = temp_wav_path(&work, "espeak", cache_key);
+        synthesize_wav(&root, &data_dir, &work, &text, speed, &tmp_wav)?;
+        let bytes = std::fs::read(&tmp_wav).map_err(|err| format!("读取音频失败: {err}"))?;
+        if bytes.is_empty() {
+            return Err("espeak-ng 输出为空".to_string());
+        }
+        let _ = std::fs::copy(&tmp_wav, &wav_path);
+        let _ = std::fs::remove_file(&tmp_wav);
+        Ok::<Vec<u8>, String>(bytes)
+    })
+    .await
+    .map_err(|err| format!("语音合成任务异常: {err}"))??;
+
     Ok(Response::new(bytes))
 }
 
@@ -193,6 +279,8 @@ fn piper_cache_key(text: &str, speed: i32) -> u64 {
 
 fn synthesize_piper_wav(
     root: &Path,
+    data_base: &Path,
+    work: &Path,
     model: &Path,
     config: &Path,
     text: &str,
@@ -212,8 +300,9 @@ fn synthesize_piper_wav(
         .arg(out_wav)
         .arg("--length_scale")
         .arg(format!("{length_scale:.3}"))
-        .env("ESPEAK_DATA_PATH", root)
-        .current_dir(root)
+        // piper 会用 ESPEAK_DATA_PATH 拼出 espeak-ng-data，且内部同样用单字节 fopen
+        .env("ESPEAK_DATA_PATH", data_base)
+        .current_dir(work)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -264,23 +353,36 @@ async fn piper_speak(app: AppHandle, text: String, speed: Option<i32>) -> Result
         .join("piper-wav");
     std::fs::create_dir_all(&cache_dir).map_err(|err| format!("创建缓存目录失败: {err}"))?;
 
-    let wav_path = cache_dir.join(format!("{:016x}.wav", piper_cache_key(&text, speed)));
-    if !wav_path.exists() {
-        let root = piper_root(&app)?;
-        let (model, config) = piper_model_files(&root)?;
-        let text_for_task = text.clone();
-        let wav_for_task = wav_path.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            synthesize_piper_wav(&root, &model, &config, &text_for_task, speed, &wav_for_task)
-        })
-        .await
-        .map_err(|err| format!("语音合成任务异常: {err}"))??;
+    let cache_key = piper_cache_key(&text, speed);
+    let wav_path = cache_dir.join(format!("{cache_key:016x}.wav"));
+    if wav_path.exists() {
+        if let Ok(bytes) = std::fs::read(&wav_path) {
+            if !bytes.is_empty() {
+                return Ok(Response::new(bytes));
+            }
+        }
     }
 
-    let bytes = std::fs::read(&wav_path).map_err(|err| format!("读取音频失败: {err}"))?;
-    if bytes.is_empty() {
-        return Err("piper 输出为空".to_string());
-    }
+    let root = piper_root(&app)?;
+    let (model, config) = piper_model_files(&root)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let (data_base, _data_dir) = ensure_espeak_data(&root, "piper")?;
+        let work = ascii_work_dir()?;
+        let tmp_wav = temp_wav_path(&work, "piper", cache_key);
+        synthesize_piper_wav(
+            &root, &data_base, &work, &model, &config, &text, speed, &tmp_wav,
+        )?;
+        let bytes = std::fs::read(&tmp_wav).map_err(|err| format!("读取音频失败: {err}"))?;
+        if bytes.is_empty() {
+            return Err("piper 输出为空".to_string());
+        }
+        let _ = std::fs::copy(&tmp_wav, &wav_path);
+        let _ = std::fs::remove_file(&tmp_wav);
+        Ok::<Vec<u8>, String>(bytes)
+    })
+    .await
+    .map_err(|err| format!("语音合成任务异常: {err}"))??;
+
     Ok(Response::new(bytes))
 }
 
@@ -295,8 +397,27 @@ fn piper_warmup(app: &AppHandle) {
         Ok(files) => files,
         Err(_) => return,
     };
-    let wav = std::env::temp_dir().join("typewords-piper-warmup.wav");
-    if synthesize_piper_wav(&root, &model, &config, "ok", PIPER_DEFAULT_SPEED, &wav).is_ok() {
+    let (data_base, _data_dir) = match ensure_espeak_data(&root, "piper") {
+        Ok(paths) => paths,
+        Err(_) => return,
+    };
+    let work = match ascii_work_dir() {
+        Ok(work) => work,
+        Err(_) => return,
+    };
+    let wav = temp_wav_path(&work, "warmup", 0);
+    if synthesize_piper_wav(
+        &root,
+        &data_base,
+        &work,
+        &model,
+        &config,
+        "ok",
+        PIPER_DEFAULT_SPEED,
+        &wav,
+    )
+    .is_ok()
+    {
         let _ = std::fs::remove_file(&wav);
     }
 }

@@ -7,6 +7,7 @@ import { useSettingStore } from '@/core/stores/setting.ts'
 import { ENV, SoundFileOptions } from '@/core/config/env.ts'
 import { getBrowserKey, getAudioFileUrl, usePlayAudio } from '@/core/hooks/sound.ts'
 import { isDesktop } from '@/core/utils/desktop.ts'
+import { desktopTtsEngineModel } from '@/core/hooks/desktop-tts.ts'
 import {
   useSoundMasterSettings,
   SOUND_VOLUME_ITEMS,
@@ -15,6 +16,8 @@ import {
 
 const settingStore = useSettingStore()
 const desktop = isDesktop()
+// 桌面版离线发音引擎：piper 神经语音 / espeak-ng
+const desktopTtsEngine = desktopTtsEngineModel
 const {
   volumeExpanded,
   volumeIsUnified,
@@ -117,8 +120,11 @@ function previewTtsVoice(voiceName: string) {
         <Option :label="$t('uk_accent')" value="uk" />
       </Select>
     </SettingItem>
-    <SettingItem v-else :title="$t('pronunciation_accent')" desc="桌面版内置 piper 神经语音（en_GB-cori-high），资源缺失时自动回退 espeak-ng">
-      <span class="text-sm color-gray">British English</span>
+    <SettingItem v-else title="桌面发音引擎" desc="piper 为神经语音，音质接近真人（模型约 110MB）；espeak-ng 为机械音，体积小、响应快。选中的引擎失败时会自动回退到另一个。">
+      <Select v-model="desktopTtsEngine" :placeholder="$t('please_select')" class="w-50!">
+        <Option label="piper（en_GB-cori-high）" value="piper" />
+        <Option label="espeak-ng（en-gb）" value="espeak" />
+      </Select>
     </SettingItem>
     <SettingItem v-if="showVolumeSubsInSections" :title="$t('volume')">
       <Slider v-model="settingStore.wordSoundVolume" showText showValue unit="%" />

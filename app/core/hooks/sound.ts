@@ -7,6 +7,7 @@ import { Toast } from '@/base'
 import { isDesktop } from '../utils/desktop'
 import { cancelEspeakAudio, isEspeakAvailable, playEspeak } from './espeak'
 import { cancelPiperAudio, isPiperAvailable, playPiper } from './piper'
+import { getDesktopTtsEngine } from './desktop-tts'
 
 /**
  * 获取当前浏览器的 OS+浏览器 组合 key，用于 ttsVoiceMap 的索引
@@ -322,11 +323,19 @@ export function useTTsPlayAudio() {
       },
     }
 
-    if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
-    if (generation !== ttsPlaybackGeneration) return
-    if (await playEspeak(text, sharedOptions)) return
-    if (generation !== ttsPlaybackGeneration) return
-    // 两个内置引擎都不可用（如资源缺失）时，回退到 WebView2 的系统 TTS
+    // 用户选的引擎优先，失败后回退到另一个，两个都不行再用系统 TTS
+    if (getDesktopTtsEngine() === 'espeak') {
+      if (isEspeakAvailable() && (await playEspeak(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+      if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+    } else {
+      if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+      if (isEspeakAvailable() && (await playEspeak(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+    }
+    // 内置引擎都不可用（如资源缺失）时，回退到 WebView2 的系统 TTS
     playWithSpeechSynthesis(text, options)
   }
 

@@ -15,6 +15,7 @@ import { useRoute } from 'vue-router'
 import { useSettingStore } from '@/core/stores/setting.ts'
 import { LIB_JS_URL, TourConfig } from '@/core/config/env.ts'
 import { _nextTick, isMobile, loadJsLib, sleep } from '@/core/utils'
+import { isDesktop } from '@/core/utils/desktop.ts'
 
 interface IProps {
   /** 是否已加载完数据，有了 words 之后再初始化 Tour */
@@ -41,8 +42,8 @@ defineExpose({
   openConflictNotice2,
 })
 
-// 首次加载时显示提示
-if (!route.query.guide) {
+// 首次加载时显示提示（桌面版没有新手教程，直接跳过）
+if (!isDesktop() && !route.query.guide) {
   setTimeout(() => {
     showCollectNotice = true
   }, 10000)
@@ -55,7 +56,7 @@ watchOnce(
     if (!ready) return
     _nextTick(async () => {
       const r = localStorage.getItem('tour-guide')
-      if (settingStore.first && !r && !isMobile()) {
+      if (!isDesktop() && settingStore.first && !r && !isMobile()) {
         const Shepherd = await loadJsLib('Shepherd', LIB_JS_URL.SHEPHERD)
         const tour = new Shepherd.Tour(TourConfig)
         tour.on('cancel', () => {
@@ -87,6 +88,8 @@ watchOnce(
 </script>
 
 <template>
-  <CollectNotice v-model="showCollectNotice" />
-  <ConflictNotice2 v-model="showConflictNotice2" />
+  <template v-if="!isDesktop()">
+    <CollectNotice v-model="showCollectNotice" />
+    <ConflictNotice2 v-model="showConflictNotice2" />
+  </template>
 </template>

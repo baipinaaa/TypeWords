@@ -20,6 +20,8 @@ import { usePracticeStore } from '@/core/stores/practice.ts'
 import { getDefaultDict, getDefaultWord } from '@/core/types/func.ts'
 import PracticeLayout from '@/components/PracticeLayout.vue'
 import PracticeOnboardingHost from '@/components/word/PracticeOnboardingHost.vue'
+// 桌面版不展示新手教程（Shepherd 引导）与收藏引导弹窗
+import { isDesktop } from '@/core/utils/desktop.ts'
 import { DICT_LIST } from '@/core/config/env.ts'
 import GroupList from '@/components/word/GroupList.vue'
 import {
@@ -630,6 +632,7 @@ useEvents([
   </PracticeLayout>
   <Statistics v-model="isComplete" :loading="settling" />
   <PracticeOnboardingHost
+    v-if="!isDesktop()"
     ref="onboardingHostRef"
     :ready="data.words.length > 0"
     :dict-id="String(route.params.id ?? '')"

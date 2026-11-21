@@ -16,8 +16,8 @@ TypeWords/
 │   ├── core/utils/desktop.ts          # isDesktop() / openExternal() / umami stub
 │   ├── core/hooks/espeak.ts           # 离线发音公共层（WAV blob 缓存/播放）
 │   ├── core/hooks/piper.ts            # 离线神经语音 piper（en_GB-cori-high）
+│   ├── core/hooks/desktop-tts.ts      # 桌面发音引擎选择（piper / espeak-ng，存 localStorage）
 │   ├── core/hooks/desktop-data.ts     # 备份文件校验 + 本地落库（无 Supabase）
-│   ├── core/hooks/espeak.ts           # 离线发音：调用 Rust 侧 espeak-ng，播放 WAV blob
 │   ├── components/desktop/DesktopDataImportWizard.vue  # 首启数据导入向导
 │   └── plugins/05.desktop.client.ts   # 桌面端插件：统计 stub、离线守卫、手动导入入口
 ├── src-tauri/                # Tauri 工程（Rust）
@@ -127,14 +127,15 @@ zip 里若带 `mp3/` 目录（自定义文章音频），会一并导入。
 | 第三方词典 iframe（有道/金山） | 内嵌 iframe 查词 | **不渲染**，未收录时提示离线不可查 |
 | 远程字体（fonts.gstatic.com） | 加载 Garamond | 改为 `local()` 回退系统衬线字体，零请求 |
 | 单词发音 | 有道 `dictvoice` 在线音频（美音/英音可选） | **内置 piper（en_GB-cori-high）神经语音离线合成**，失败回退 espeak-ng，零联网 |
-| 发音音调选择 | 设置里可选美音/英音 | **选择器隐藏**，桌面版固定英式（en-GB） |
+| 桌面发音引擎 | 无（网页版只有美音/英音） | **设置里可切换 piper / espeak-ng**（默认 piper，选择存 localStorage）；网页版的美音/英音选择器在桌面端隐藏 |
+| 新手教程（Shepherd 引导 + 收藏引导弹窗） | 首次练习自动弹出 | **桌面端不加载**（`PracticeOnboardingHost` 不渲染） |
 | 小程序推广 / IE 提示 | 显示 | 隐藏 |
 | 百度网络翻译 | 按钮存在（但 appid/key 从未配置，实为不可用） | 按钮与引擎下拉**已摘除**，保留「拆分句子」与手动翻译 |
 | 移动端离屏输入框 | 创建 | **不创建**（规避 WebView2 的 IME/TSF 冻结问题） |
 | 关闭窗口 | — | 隐藏到托盘；托盘菜单「退出」才真正退出 |
 | 全局快捷键 | — | `Ctrl + Alt + W` 显示/隐藏主窗口 |
 
-发音：单词发音与例句朗读**全部在本地合成**，三级优先级：
+发音：单词发音与例句朗读**全部在本地合成**，三级优先级（可在设置里切换前两级的顺序，默认 piper 优先）：
 1. **piper + `en_GB-cori-high`**（VITS 神经语音，自然人声，英式）—— `src-tauri/resources/piper`
 2. **espeak-ng**（机械音但极轻量，英式 `-v en-gb`）—— `src-tauri/resources/espeak-ng`
 3. WebView2 系统 `speechSynthesis`（仅在两者都缺失时兜底）

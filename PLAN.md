@@ -443,3 +443,21 @@ step 15（dist 产物）、27（appDirectoriesOverride）、29（Shepherd 桌面
 | tag 来源 | `Sync version from tag` 仅 tag 推送时执行，取 `github.ref_name` | job 级 `env.RELEASE_TAG: ${{ inputs.tag || github.ref_name }}`，版本同步步骤始终执行，为空则报错 |
 | Release 正文 | `generate_release_notes: true`（自动生成 changelog） | 手写固定正文（下载哪个、离线说明、迁移方式、体积提示），并 `fail_on_unmatched_files: true` 保证附件缺失时构建失败 |
 | 附件 | `files: out/*` | `files: out/*.exe`（只有安装包与便携 exe，不含无关文件） |
+
+### 偏差 8：桌面发音引擎可切换 + 桌面端去掉新手教程 + 中文安装路径修复——用户后续要求
+
+用户要求（原文）：「增加切换TTS的功能，可以在vits-piper-en_GB-cori-high和espeak-ng之间切换，而且给我去掉新手教程」。
+
+| 项目 | 偏差 6 的状态 | 现在 | 落点 |
+| --- | --- | --- | --- |
+| 发音引擎顺序 | 固定 piper → espeak-ng → 系统 TTS | **用户可在设置里切换**，选中的优先，失败自动回退另一个，再回退系统 TTS | `app/core/hooks/desktop-tts.ts`（localStorage `typewords:desktop-tts-engine`）+ `sound.ts` 的 `playDesktopTtsChain()` |
+| 设置页 UI | 只显示「British English」文字 | 「桌面发音引擎」下拉：`piper（en_GB-cori-high）` / `espeak-ng（en-gb）` | `app/components/setting/SoundSetting.vue` |
+| 新手教程（Shepherd + 收藏引导） | 桌面端首次练习会弹出 | **桌面端完全不加载**（宿主组件不渲染，script 内的定时器与 Shepherd 初始化都加了 `isDesktop()` 守卫），网页版行为不变 | `app/pages/(words)/practice-words/[id].vue`、`app/components/word/PracticeOnboardingHost.vue` |
+| 中文安装路径 | 未考虑 | `espeak-ng-data` 与临时 wav 全部搬到纯 ASCII 工作目录（`%ProgramData%\TypeWords\tts\<tag>`，退化 `%TEMP%\TypeWords-tts`），并用 `--path=` + `ESPEAK_DATA_PATH` 指过去 | `src-tauri/src/lib.rs` 的 `ascii_work_dir()` / `ensure_espeak_data()` / `temp_wav_path()` |
+
+实现备忘：
+
+- piper 自身读取模型不依赖单字节路径（实测中文路径下 `Loaded voice in 0.95s` 成功），失败点在它内部调用的 espeak-ng 语音学库打开 `espeak-ng-data\phontab`；因此只需要把 **espeak-ng-data 与输出 wav** 放到 ASCII 路径，模型仍可留在安装目录。
+- `ESPEAK_DATA_PATH` / `--path` 的语义是「包含 `espeak-ng-data` 的父目录」：piper 传 `...\tts\piper`，espeak-ng.exe 传 `...\tts\espeak-ng`。
+- 故障现场证据：手动执行 piper 时 `Error processing file 'F:\????\TypeWords\resources\piper\espeak-ng-data\phontab': Illegal byte sequence`；把 resources 拷到 `F:\tts-test` 后同一命令成功（`Real-time factor: 0.60`），据此定位为路径编码问题而非模型/资源缺失。
+- PLAN 步骤 29（「验证 Shepherd 在桌面端可用」）已被本条取代：桌面端不再加载 Shepherd。
