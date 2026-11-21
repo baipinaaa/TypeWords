@@ -8,7 +8,7 @@
     "desktop:build": "tauri build",
     "desktop:dev": "tauri dev",
     "desktop:generate": "nuxt generate",
-    "desktop:icon": "tauri icon public/favicon.ico -o src-tauri/icons",
+    "desktop:icon": "tauri icon public/favicon.png -o src-tauri/icons",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "i18n:write": "gulp i18nWrite",

@@ -182,8 +182,11 @@ jobs:
           Write-Host ("resources/piper 共 {0:N2} MB" -f ($total / 1MB))
 
       - name: Generate app icons
-        # public/favicon.ico 实为 800x800 PNG，tauri icon 可据此生成全套图标（仓库不提交二进制图标）
-        run: pnpm desktop:icon
+        # public/favicon.png 是 800x800 PNG（tauri icon 只识别 png/svg 扩展名），
+        # 据此生成全套图标，仓库不提交二进制图标
+        run: |
+          pnpm exec tauri --version
+          pnpm desktop:icon
 
       - name: Build (pnpm generate + tauri build)
         run: pnpm desktop:build

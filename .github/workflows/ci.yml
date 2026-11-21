@@ -83,7 +83,10 @@ jobs:
       # tauri-build 编译期会为 Windows exe 生成资源，需要真实可解析的 icon.ico，
       # 因此与其他二进制图标一样，在 CI 里由 tauri icon 现场生成（仓库不提交图标）
       - name: Generate app icons
-        run: pnpm desktop:icon
+        # public/favicon.png 是 800x800 PNG（tauri icon 只接受 png/svg，不接受 .ico 扩展名）
+        run: |
+          pnpm exec tauri --version
+          pnpm desktop:icon
 
       # espeak-ng 运行时只在 release.yml 里下载解包（约 12MB），门禁里只需让
       # bundle.resources 的 glob 有匹配，避免 tauri-build 因空目录报错。

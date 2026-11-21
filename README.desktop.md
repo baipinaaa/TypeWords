@@ -50,7 +50,7 @@ TypeWords/
 
    - `pnpm install --no-frozen-lockfile`
    - 用 tag 号覆盖 `src-tauri/tauri.conf.json` 的 `version`
-   - `pnpm desktop:icon`（从 `public/favicon.ico` 生成 `src-tauri/icons/*`）
+   - `pnpm desktop:icon`（从 `public/favicon.png` 生成 `src-tauri/icons/*`；该文件是 800x800 PNG）
    - `pnpm desktop:build` → `tauri build`
    - 收集 `*-setup.exe` 与裸 `typewords.exe`（重命名为 `TypeWords-portable.exe`）
    - **直接发布到 GitHub Release**（`softprops/action-gh-release`），不再上传 Actions artifact
