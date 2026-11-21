@@ -13,6 +13,11 @@ env:
   NUXT_TELEMETRY_DISABLED: '1'
   CARGO_TERM_COLOR: always
 
+# 同一分支有新提交时，取消旧的 CI 运行
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web-build:
     name: Web (nuxt generate)

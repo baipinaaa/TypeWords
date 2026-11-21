@@ -18,6 +18,11 @@ on:
 permissions:
   contents: write
 
+# 新的发布任务开始后，自动取消仍在跑的旧发布任务
+concurrency:
+  group: release-desktop
+  cancel-in-progress: true
+
 # NUXT_DESKTOP=1 让 nuxt.config.ts 走纯 SPA（ssr:false），这是 Tauri 静态产物所必需的
 env:
   NUXT_DESKTOP: '1'
@@ -192,24 +197,76 @@ jobs:
         run: pnpm desktop:build
 
       - name: Collect artifacts
+        # 便携版：exe + resources（piper / espeak-ng）+ 说明文档，布局与安装版一致，
+        # Tauri 的 resource_dir() 在 Windows 上等于 exe 所在目录，因此开箱即用
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path out | Out-Null
-          $setup = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Select-Object -First 1
-          if (-not $setup) { throw "未找到 NSIS 安装包" }
-          Copy-Item $setup.FullName "out/$($setup.Name)"
-          Copy-Item "src-tauri/target/release/typewords.exe" "out/TypeWords-portable.exe"
-          Get-ChildItem out | ForEach-Object {
-            "{0}  {1:N2} MB" -f $_.Name, ($_.Length / 1MB) | Write-Host
+          $ErrorActionPreference = 'Stop'
+          $pkg = Join-Path $PWD 'out/TypeWords'
+          if (Test-Path $pkg) { Remove-Item -Recurse -Force $pkg }
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+
+          $exe = 'src-tauri/target/release/typewords.exe'
+          if (-not (Test-Path $exe)) { throw "未找到构建产物 $exe" }
+          Copy-Item $exe (Join-Path $pkg 'TypeWords.exe')
+
+          foreach ($name in @('piper', 'espeak-ng')) {
+            $src = "src-tauri/resources/$name"
+            if (-not (Test-Path $src)) { continue }
+            $dst = Join-Path $pkg "resources/$name"
+            New-Item -ItemType Directory -Force -Path $dst | Out-Null
+            Copy-Item -Path (Join-Path $src '*') -Destination $dst -Recurse -Force
+            $size = (Get-ChildItem $dst -Recurse -File | Measure-Object -Sum Length).Sum
+            Write-Host ("  resources/{0}: {1:N2} MB" -f $name, ($size / 1MB))
+          }
+          foreach ($required in @('resources/piper/piper.exe', 'resources/piper/voices', 'resources/espeak-ng/espeak-ng-data')) {
+            if (-not (Test-Path (Join-Path $pkg $required))) { throw "便携目录缺少 $required" }
           }
 
+          if (Test-Path 'README.desktop.md') { Copy-Item 'README.desktop.md' (Join-Path $pkg 'README.desktop.md') }
+          if (Test-Path 'LICENSE') { Copy-Item 'LICENSE' (Join-Path $pkg 'LICENSE') }
+
+          $total = (Get-ChildItem $pkg -Recurse -File | Measure-Object -Sum Length).Sum
+          Write-Host ("便携目录总大小 {0:N2} MB" -f ($total / 1MB))
+
+      - name: Pack portable archive (7z + zstd, max)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+          if (-not (Test-Path $sevenZip)) {
+            $found = Get-Command 7z.exe -ErrorAction SilentlyContinue
+            if ($found) { $sevenZip = $found.Source }
+          }
+          if (-not (Test-Path $sevenZip)) { throw '未找到 7z.exe（GitHub Windows runner 通常预装）' }
+          & $sevenZip | Select-Object -First 2 | Write-Host
+
+          $archive = Join-Path $PWD ("out/TypeWords-{0}-windows-x64-portable.7z" -f $env:RELEASE_TAG)
+          if (Test-Path $archive) { Remove-Item $archive -Force }
+
+          Push-Location out
+          # -t7z 容器 + zstd 编码器 + level 22（极限）+ 2 线程限制内存（level 22 每线程约 1.3GB）
+          & $sevenZip a -t7z -m0=zstd -mx=22 -mmt=2 -y $archive 'TypeWords'
+          $code = $LASTEXITCODE
+          if ($code -ne 0 -or -not (Test-Path $archive)) {
+            Write-Host "zstd 压缩失败（7z 可能不支持 zstd 编码），回退到 LZMA2 -mx=9"
+            if (Test-Path $archive) { Remove-Item $archive -Force }
+            & $sevenZip a -t7z -mx=9 -mmt=on -y $archive 'TypeWords'
+            $code = $LASTEXITCODE
+          }
+          Pop-Location
+          if ($code -ne 0 -or -not (Test-Path $archive)) { throw "7z 打包失败，退出码 $code" }
+
+          $item = Get-Item $archive
+          Write-Host ("压缩包 {0}: {1:N2} MB" -f $item.Name, ($item.Length / 1MB))
+
       - name: Publish GitHub Release
-        # 不再上传 Actions artifact：直接作为 Release 附件发布
+        # 不再上传 Actions artifact，也不发 NSIS 安装包：只发布解压即用的 7z 便携包
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: TypeWords ${{ env.RELEASE_TAG }}
-          files: out/*.exe
+          files: out/*.7z
           fail_on_unmatched_files: true
           draft: false
           prerelease: false
@@ -218,15 +275,20 @@ jobs:
 
             纯离线构建：启动后不发任何外部网络请求（严格 CSP + 运行时网络守卫）。
 
-            ### 下载哪个
-            - `TypeWords_*_x64-setup.exe` —— NSIS 安装包，按当前用户安装，无需管理员权限
-            - `TypeWords-portable.exe` —— 便携版裸可执行文件，数据保存在 exe 同目录的 `app-data/`
+            ### 下载
+            - `TypeWords-${{ env.RELEASE_TAG }}-windows-x64-portable.7z` —— 便携版（7z + zstd 极限压缩）
+
+            ### 使用
+            1. 用 7-Zip 解压到**纯英文路径**（例如 `D:\TypeWords`）。离线发音依赖 espeak-ng 系的单字节文件接口，路径含中文会导致发音失败。
+            2. 运行 `TypeWords.exe`（无需安装，数据保存在同目录的 `app-data/`）。
+            3. 需要 Microsoft Edge WebView2 运行时（Windows 11 自带；Windows 10 一般已随 Edge 安装）。
 
             ### 说明
-            - 发音完全离线：内置 piper（`en_GB-cori-high` 神经语音），失败自动回退 espeak-ng（`en-gb`）
-            - 首次安装需要 WebView2 运行时，缺失时安装器会自动下载
+            - 包内已包含全部资源：`TypeWords.exe` + `resources/piper`（`en_GB-cori-high` 神经语音）+ `resources/espeak-ng`
+            - 发音完全离线，设置里可切换 piper / espeak-ng
             - 从网页版迁移数据：首次启动会弹出导入向导，选择网页版导出的 `TypeWords-User-Data-*.zip`
             - 托盘图标 + `Ctrl + Alt + W` 显示/隐藏主窗口，关闭窗口只是隐藏到托盘
+            - 常见问题与目录结构见包内 `README.desktop.md`
 
             详细说明见 [README.desktop.md](https://github.com/${{ github.repository }}/blob/${{ env.RELEASE_TAG }}/README.desktop.md)。
 
@@ -239,9 +301,10 @@ jobs:
             '',
             '- 前端产物: dist/ (SPA，含 dicts/list/sound/libs/imgs 内嵌资源)',
             '- 离线发音: piper en_GB-cori-high 优先，回退 espeak-ng (en-gb)',
-            '- 安装包: TypeWords_*_x64-setup.exe (NSIS, currentUser, downloadBootstrapper)',
-            '- 便携版: TypeWords-portable.exe —— 数据保存在 exe 同目录的 app-data/',
-            '- 发布位置: GitHub Release（不再上传 Actions artifact）',
+            '- 发布产物: TypeWords-<tag>-windows-x64-portable.7z（7z + zstd 极限压缩）',
+            '- 包内内容: TypeWords.exe + resources/piper + resources/espeak-ng + README.desktop.md',
+            '- 不再发布 NSIS 安装包',
+            '- 发布位置: GitHub Release（不上传 Actions artifact）',
             ''
           )
           $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
