@@ -182,6 +182,53 @@ export function cancelWordPracticeAudio() {
   }
 }
 
+/**
+ * 桌面端发音链（模块级、不依赖 Pinia，可以安全地从事件回调调用）。
+ *
+ * 之所以不直接用 `useTTsPlayAudio()`：那个函数内部要 `useSettingStore()`，
+ * 在 practise 页的事件回调用里调用会抛错，导致单词发音静默中断
+ * （现场日志：只留下 `playAudio.desktop`，从未出现 `play.enter`）。
+ */
+async function playDesktopTtsChainStandalone(text: string, options: TTsPlayOptions) {
+  const generation = ++ttsPlaybackGeneration
+  const sharedOptions = {
+    rate: options.rate,
+    volume: options.volume,
+    onEnd: () => {
+      if (generation !== ttsPlaybackGeneration) return
+      options.onEnd?.()
+    },
+  }
+  try {
+    const engine = getDesktopTtsEngine()
+    logTtsDebug('chain.standalone', `engine=${engine} text=${text.slice(0, 24)}`)
+    if (engine === 'espeak') {
+      if (isEspeakAvailable() && (await playEspeak(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+      if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+    } else {
+      if (isPiperAvailable() && (await playPiper(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+      if (isEspeakAvailable() && (await playEspeak(text, sharedOptions))) return
+      if (generation !== ttsPlaybackGeneration) return
+    }
+    // 两个内置引擎都不可用：退到 WebView2 的系统 TTS（英式）
+    if (typeof speechSynthesis === 'undefined') return
+    logTtsDebug('chain.standalone.speech', text.slice(0, 24))
+    const msg = new SpeechSynthesisUtterance(text)
+    msg.rate = options.rate ?? 1
+    msg.volume = options.volume ?? 1
+    msg.lang = 'en-GB'
+    msg.onend = () => options.onEnd?.()
+    msg.onerror = () => options.onEnd?.()
+    speechSynthesis.speak(msg)
+  } catch (error) {
+    console.warn('[desktop-tts] 桌面发音链异常', error)
+    logTtsDebug('chain.standalone.error', String(error))
+  }
+}
+
 export function usePlayWordAudio() {
   const settingStore = useSettingStore()
 
@@ -220,10 +267,11 @@ export function usePlayWordAudio() {
       onEnd?.()
     }
 
-    // 桌面版（离线）：不请求有道发音，改用内置 espeak-ng（en-gb）合成
+    // 桌面版（离线）：不请求有道发音，改用内置引擎合成
     if (isDesktop()) {
-      logTtsDebug('playAudio.desktop', `${word} rate=${playbackRate}`)
-      useTTsPlayAudio().play(word, { rate: playbackRate, onEnd: onended })
+      const volume = settingStore.wordSoundVolume / 100
+      logTtsDebug('playAudio.desktop', `${word} rate=${playbackRate} vol=${volume}`)
+      void playDesktopTtsChainStandalone(word, { rate: playbackRate, volume, onEnd: onended })
       onPlay?.()
       return
     }
