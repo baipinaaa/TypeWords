@@ -4,6 +4,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use tauri::ipc::Response;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -12,6 +15,11 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 const MAIN_LABEL: &str = "main";
 const TOGGLE_SHORTCUT: &str = "ctrl+alt+w";
+
+/// Windows：以「不创建控制台窗口」的方式启动子进程。
+/// piper.exe / espeak-ng.exe 都是控制台程序，不加这个标志每次发音都会闪一个 cmd 窗口。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// 桌面版离线发音：内置 espeak-ng，固定英式英语（en-gb）
 const ESPEAK_VOICE: &str = "en-gb";
@@ -124,7 +132,8 @@ fn synthesize_wav(
     // 参数与输出路径全部由安装目录提供：espeak-ng 内部用单字节 fopen 打开路径
     // ESPEAK_DATA_PATH / --path 的语义是「包含 espeak-ng-data 的父目录」
     let data_home = data_dir.parent().unwrap_or(data_dir);
-    let output = Command::new(root.join("espeak-ng.exe"))
+    let mut command = Command::new(root.join("espeak-ng.exe"));
+    command
         .arg(format!("--path={}", data_home.display()))
         .arg("-v")
         .arg(ESPEAK_VOICE)
@@ -134,7 +143,10 @@ fn synthesize_wav(
         .arg(out_wav)
         .arg(&payload)
         .env("ESPEAK_DATA_PATH", data_home)
-        .current_dir(work)
+        .current_dir(work);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command
         .output()
         .map_err(|err| format!("启动 espeak-ng 失败: {err}"))?;
     if !output.status.success() {
@@ -296,7 +308,8 @@ fn synthesize_piper_wav(
         .clamp(PIPER_MIN_LENGTH_SCALE, PIPER_MAX_LENGTH_SCALE);
     let data_home = data_dir.parent().unwrap_or(data_dir);
 
-    let mut child = Command::new(root.join("piper.exe"))
+    let mut command = Command::new(root.join("piper.exe"));
+    command
         .arg("--model")
         .arg(model)
         .arg("--config")
@@ -313,7 +326,10 @@ fn synthesize_piper_wav(
         .current_dir(work)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let mut child = command
         .spawn()
         .map_err(|err| format!("启动 piper 失败: {err}"))?;
 

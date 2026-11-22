@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { APP_NAME, GITHUB, Origin } from '@/core/config/env.ts'
 import { BaseIcon } from '@/base'
+import { isDesktop } from '@/core/utils/desktop.ts'
 import { usePlayBeep, usePlayCorrect, usePlayKeyboardAudio } from '@/core/hooks/sound.ts'
 
 definePageMeta({ layout: 'empty' })
+
+const desktop = isDesktop()
 
 onMounted(() => {
   startTypingAnimation()
@@ -196,8 +199,9 @@ useSeoMeta({
         </nav>
         <!-- Actions -->
         <div class="ml-auto flex items-center gap-2 text-[var(--hw-text-2)]">
-          <!-- GitHub -->
+          <!-- GitHub（桌面版为离线版本，不展示外链） -->
           <a
+            v-if="!desktop"
             class="flex center gap-1 text-[var(--hw-text-2)] no-underline"
             :href="GITHUB"
             target="_blank"
@@ -243,7 +247,7 @@ useSeoMeta({
           <!-- ── Left: 文字区 ── -->
           <div class="flex-1 text-center lg:text-left">
             <!-- Social proof badge -->
-            <div class="flex justify-center lg:justify-start mb-5">
+            <div v-if="!desktop" class="flex justify-center lg:justify-start mb-5">
               <a
                 :href="GITHUB"
                 target="_blank"
@@ -347,6 +351,7 @@ useSeoMeta({
                 {{ $t('hero_cta_start') }}
               </button>
               <a
+                v-if="!desktop"
                 class="inline-flex items-center justify-center gap-2 px-7 h-12 rounded-xl font-semibold text-[.97rem] text-[var(--hw-text)] bg-transparent border border-solid border-[var(--hw-border)] no-underline hover:bg-[rgba(124,58,237,.06)] hover:border-[#7c3aed] hover:text-[#7c3aed] transition-all duration-200 sm:w-auto"
                 :href="GITHUB"
                 target="_blank"
@@ -361,7 +366,7 @@ useSeoMeta({
             </div>
 
             <!-- 网站地址 -->
-            <div class="flex justify-center lg:justify-start mt-4">
+            <div v-if="!desktop" class="flex justify-center lg:justify-start mt-4">
               <a
                 :href="Origin"
                 target="_blank"
@@ -515,7 +520,7 @@ useSeoMeta({
             </div>
 
             <!-- ── 小程序码 — 独立卡片（不再混入 CTA 按钮旁） ── -->
-            <div class="mini-qr-card w-full box-border flex">
+            <div v-if="!desktop" class="mini-qr-card w-full box-border flex">
               <NuxtImg
                 src="/imgs/mini.png"
                 :alt="$t('mini_program')"
